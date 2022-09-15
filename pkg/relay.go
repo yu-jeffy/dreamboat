@@ -444,6 +444,14 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 		return err
 	}
 
+	headerAndTrace, err := state.Datastore().GetHeader(ctx, Slot(submitBlockRequest.Message.Slot))
+	if err != nil && !errors.Is(err, ds.ErrNotFound) {
+		return err
+	} else if err == nil && submitBlockRequest.Message.Value.Cmp(&headerAndTrace.Trace.Value) < 1 {
+		// if the bid is not higher than the last one, then do not store the submission
+		return nil
+	}
+
 	header, err := types.PayloadToPayloadHeader(submitBlockRequest.ExecutionPayload)
 	if err != nil {
 		return err
@@ -459,7 +467,7 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 				BuilderPubkey:        payload.Trace.Message.BuilderPubkey,
 				ProposerPubkey:       payload.Trace.Message.ProposerPubkey,
 				ProposerFeeRecipient: payload.Payload.Data.FeeRecipient,
-				Value:                payload.Trace.Message.Value,
+				Value:                submitBlockRequest.Message.Value,
 			},
 			Timestamp: payload.Payload.Data.Timestamp,
 		},
