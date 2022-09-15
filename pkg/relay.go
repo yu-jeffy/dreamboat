@@ -411,6 +411,7 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 		"slot":             submitBlockRequest.Message.Slot,
 		"blockHash":        submitBlockRequest.ExecutionPayload.BlockHash,
 		"proposer":         submitBlockRequest.Message.ProposerPubkey,
+		"bid":              submitBlockRequest.Message.Value,
 	}).Trace("block submission requested")
 
 	_, err := rs.verifyBlock(submitBlockRequest)
@@ -448,6 +449,7 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 	if err != nil && !errors.Is(err, ds.ErrNotFound) {
 		return err
 	} else if err == nil && submitBlockRequest.Message.Value.Cmp(&headerAndTrace.Trace.Value) < 1 {
+		logger.Debugf("lower bid than latest received: current %s  received %s", headerAndTrace.Trace.Value.String(), submitBlockRequest.Message.Value.String())
 		// if the bid is not higher than the last one, then do not store the submission
 		return nil
 	}
