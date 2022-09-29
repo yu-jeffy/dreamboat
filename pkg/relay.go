@@ -248,7 +248,7 @@ func (rs *DefaultRelay) GetHeader(ctx context.Context, request HeaderRequest, st
 		return nil, fmt.Errorf(noBuilderBidMsg)
 	}
 
-	header := headers[len(headers)-1]  // choose the received last header
+	header := headers[len(headers)-1] // choose the received last header
 
 	if header.Header == nil || (header.Header.ParentHash != parentHash) {
 		log.Debug(badHeaderMsg)
@@ -463,7 +463,7 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 	_, err = state.Datastore().GetDelivered(ctx, Query{Slot: slot})
 	if err == nil {
 		logger.Debug("block submission after payload delivered")
-		return errors.New("the slot payload was already delivered")
+		return errors.New("slot payload already delivered")
 	}
 
 	payload := SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitBlockRequest)
