@@ -450,7 +450,6 @@ func (s *DefaultService) GetBlockReceived(ctx context.Context, query TraceQuery)
 	} else {
 		return s.getTailBlockReceived(ctx, query.Limit)
 	}
-
 	if err == nil {
 		traces := make([]BidTraceWithTimestamp, 0, len(events))
 		for _, event := range events {

@@ -488,6 +488,8 @@ func (rs *DefaultRelay) SubmitBlock(ctx context.Context, submitBlockRequest *typ
 				ProposerPubkey:       payload.Trace.Message.ProposerPubkey,
 				ProposerFeeRecipient: payload.Payload.Data.FeeRecipient,
 				Value:                submitBlockRequest.Message.Value,
+				GasLimit:             submitBlockRequest.Message.GasLimit,
+				GasUsed:              submitBlockRequest.Message.GasUsed,
 			},
 			Timestamp: payload.Payload.Data.Timestamp,
 		},
