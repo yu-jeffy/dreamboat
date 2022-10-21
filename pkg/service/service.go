@@ -176,7 +176,7 @@ func (s *DefaultService) beaconEventLoop(ctx context.Context, client BeaconClien
 
 	defer s.Log.Debug("beacon loop stopped")
 
-	events := make(chan HeadEvent)
+	events := make(chan structs.HeadEvent)
 
 	client.SubscribeToHeadEvents(ctx, events)
 
