@@ -2,21 +2,28 @@ package main
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"os"
 
 	"time"
 
-	relay "github.com/blocknative/dreamboat/pkg"
+	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
+	"github.com/blocknative/dreamboat/pkg/relay"
+	"github.com/blocknative/dreamboat/pkg/service"
+	badger "github.com/ipfs/go-ds-badger2"
+	"github.com/sirupsen/logrus"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
-	"github.com/lthibault/log"
-	"github.com/sirupsen/logrus"
 	blst "github.com/supranational/blst/bindings/go"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/blocknative/dreamboat/pkg/api"
+	"github.com/blocknative/dreamboat/pkg/store/datastore"
 )
 
 const (
@@ -101,9 +108,14 @@ var flags = []cli.Flag{
 }
 
 var (
-	config = relay.Config{Log: log.New()}
-	svr    http.Server
+	cfg config.Config
+	svr http.Server
 )
+
+func init() {
+	cfg = config.NewConfig()
+
+}
 
 // Main starts the relay
 func main() {
@@ -117,7 +129,7 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		config.Log.Fatal(err)
+		cfg.Log.Fatal(err)
 	}
 }
 
@@ -128,8 +140,8 @@ func setup() cli.BeforeFunc {
 			return err
 		}
 
-		config = relay.Config{
-			Log:                 logger(c),
+		cfg = config.Config{
+			Log:                 config.Logger(c),
 			RelayRequestTimeout: c.Duration("timeout"),
 			Network:             c.String("network"),
 			BuilderCheck:        c.Bool("check-builder"),
@@ -175,13 +187,75 @@ func run() cli.ActionFunc {
 		g, ctx := errgroup.WithContext(c.Context)
 
 		// setup the relay service
-		service := &relay.DefaultService{
-			Log:    config.Log,
-			Config: config,
+		service := &service.DefaultService{
+			Log: cfg.Log,
+			TTL: cfg.TTL,
+		}
+
+		if s.Log == nil {
+			s.Log = log.New().WithField("service", "RelayService")
+		}
+
+		timeRelayStart := time.Now()
+		if s.Relay == nil {
+			s.Relay, err = relay.NewRelay(s.Config)
+			if err != nil {
+				return
+			}
+		}
+		s.Log.WithFields(logrus.Fields{
+			"service":     "relay",
+			"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
+		}).Info("initialized")
+
+		timeDataStoreStart := time.Now()
+		if s.Datastore == nil {
+			if s.Storage == nil {
+				storage, err := badger.NewDatastore(s.Config.Datadir, &badger.DefaultOptions)
+				if err != nil {
+					s.Log.WithError(err).Fatal("failed to initialize datastore")
+					return err
+				}
+				s.Storage = &TTLDatastoreBatcher{storage}
+			}
+
+			s.Datastore = &datastore.Datastore{TTLStorage: s.Storage}
+		}
+		s.Log.
+			WithFields(logrus.Fields{
+				"service":     "datastore",
+				"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
+			}).Info("data store initialized")
+
+		s.state.datastore.Store(s.Datastore)
+
+		if s.NewBeaconClient == nil {
+			s.NewBeaconClient = func() (BeaconClient, error) {
+				clients := make([]BeaconClient, 0, len(s.Config.BeaconEndpoints))
+				for _, endpoint := range s.Config.BeaconEndpoints {
+					client, err := NewBeaconClient(endpoint, s.Config)
+					if err != nil {
+						return nil, err
+					}
+					clients = append(clients, client)
+				}
+				return NewMultiBeaconClient(s.Config.Log.WithField("service", "multi-beacon client"), clients), nil
+			}
 		}
 
 		g.Go(func() error {
-			return service.Run(ctx)
+
+			client, err := s.NewBeaconClient()
+			if err != nil {
+				s.Log.WithError(err).Warn("failed beacon client registration")
+				return err
+			}
+
+			s.Log.Info("beacon client initialized")
+
+			return s.beaconEventLoop(ctx, client)
+
+			//return service.Run(ctx)
 		})
 
 		// wait for the relay service to be ready
@@ -191,7 +265,7 @@ func run() cli.ActionFunc {
 			return g.Wait()
 		}
 
-		config.Log.Debug("relay service ready")
+		cfg.Log.Debug("relay service ready")
 
 		// run the http server
 		g.Go(func() (err error) {
@@ -199,13 +273,13 @@ func run() cli.ActionFunc {
 				return ctx
 			}
 
-			svr.Handler = &relay.API{
+			svr.Handler = &api.API{
 				Service:       service,
-				Log:           config.Log,
+				Log:           cfg.Log,
 				EnableProfile: c.Bool("profile"),
 			}
 
-			config.Log.Info("http server listening")
+			cfg.Log.Info("http server listening")
 			if err = svr.ListenAndServe(); err == http.ErrServerClosed {
 				err = nil
 			}
@@ -225,64 +299,4 @@ func run() cli.ActionFunc {
 
 		return g.Wait()
 	}
-}
-
-func logger(c *cli.Context) log.Logger {
-	return log.New(
-		withLevel(c),
-		withFormat(c),
-		withErrWriter(c))
-}
-
-func withLevel(c *cli.Context) (opt log.Option) {
-	var level = log.FatalLevel
-	defer func() {
-		opt = log.WithLevel(level)
-	}()
-
-	if c.Bool("trace") {
-		level = log.TraceLevel
-		return
-	}
-
-	if c.String("logfmt") == "none" {
-		return
-	}
-
-	switch c.String("loglvl") {
-	case "trace", "t":
-		level = log.TraceLevel
-	case "debug", "d":
-		level = log.DebugLevel
-	case "info", "i":
-		level = log.InfoLevel
-	case "warn", "warning", "w":
-		level = log.WarnLevel
-	case "error", "err", "e":
-		level = log.ErrorLevel
-	case "fatal", "f":
-		level = log.FatalLevel
-	default:
-		level = log.InfoLevel
-	}
-
-	return
-}
-
-func withFormat(c *cli.Context) log.Option {
-	var fmt logrus.Formatter
-
-	switch c.String("logfmt") {
-	case "none":
-	case "json":
-		fmt = &logrus.JSONFormatter{PrettyPrint: c.Bool("prettyprint")}
-	default:
-		fmt = new(logrus.TextFormatter)
-	}
-
-	return log.WithFormatter(fmt)
-}
-
-func withErrWriter(c *cli.Context) log.Option {
-	return log.WithWriter(c.App.ErrWriter)
 }

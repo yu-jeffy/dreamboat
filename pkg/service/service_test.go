@@ -1,4 +1,4 @@
-package relay_test
+package service_test
 
 import (
 	"context"

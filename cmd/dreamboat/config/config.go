@@ -1,4 +1,4 @@
-package relay
+package config
 
 import (
 	"errors"
@@ -7,9 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/lthibault/log"
+	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
 )
 
 const (
@@ -32,18 +35,6 @@ const (
 	BellatrixForkVersionGoerli  = "0x02001020"
 )
 
-type PubKey struct{ types.PublicKey }
-
-func (pk PubKey) Loggable() map[string]any {
-	return map[string]any{
-		"pubkey": pk,
-	}
-}
-
-func (pk PubKey) Bytes() []byte {
-	return pk.PublicKey[:]
-}
-
 // Config provides all available options for the default BeaconClient and Relay
 type Config struct {
 	Log                 log.Logger
@@ -59,14 +50,18 @@ type Config struct {
 	CheckKnownValidator bool
 
 	// private fields; populated during validation
-	builders              map[PubKey]*builder
+	builders              map[structs.PubKey]*builder
 	genesisForkVersion    string
 	genesisValidatorsRoot string
 	bellatrixForkVersion  string
 }
 
+func NewConfig() Config {
+	return Config{Log: log.New()}
+}
+
 func (c *Config) validate() error {
-	c.builders = make(map[PubKey]*builder)
+	c.builders = make(map[structs.PubKey]*builder)
 
 	if err := c.validateNetwork(); err != nil {
 		return err
@@ -118,7 +113,7 @@ func (c *Config) validateBuilders() (err error) {
 
 // builder represents a builder that the relay service connects to.
 type builder struct {
-	PubKey PubKey
+	PubKey structs.PubKey
 	URL    *url.URL
 }
 
@@ -142,7 +137,7 @@ func newBuilderEntry(relayURL string) (*builder, error) {
 		return nil, errors.New("missing relay public key")
 	}
 
-	var pk PubKey
+	var pk structs.PubKey
 	if err = pk.UnmarshalText([]byte(u.User.Username())); err != nil {
 		return nil, err
 	}
@@ -171,4 +166,64 @@ func ensureScheme(url string) string {
 
 func hasPubKey(u *url.URL) bool {
 	return u.User.Username() != ""
+}
+
+func Logger(c *cli.Context) log.Logger {
+	return log.New(
+		withLevel(c),
+		withFormat(c),
+		withErrWriter(c))
+}
+
+func withLevel(c *cli.Context) (opt log.Option) {
+	var level = log.FatalLevel
+	defer func() {
+		opt = log.WithLevel(level)
+	}()
+
+	if c.Bool("trace") {
+		level = log.TraceLevel
+		return
+	}
+
+	if c.String("logfmt") == "none" {
+		return
+	}
+
+	switch c.String("loglvl") {
+	case "trace", "t":
+		level = log.TraceLevel
+	case "debug", "d":
+		level = log.DebugLevel
+	case "info", "i":
+		level = log.InfoLevel
+	case "warn", "warning", "w":
+		level = log.WarnLevel
+	case "error", "err", "e":
+		level = log.ErrorLevel
+	case "fatal", "f":
+		level = log.FatalLevel
+	default:
+		level = log.InfoLevel
+	}
+
+	return
+}
+
+func withFormat(c *cli.Context) log.Option {
+	var fmt logrus.Formatter
+
+	switch c.String("logfmt") {
+	case "none":
+	case "json":
+		fmt = &logrus.JSONFormatter{PrettyPrint: c.Bool("prettyprint")}
+	default:
+		fmt = new(logrus.TextFormatter)
+	}
+
+	return log.WithFormatter(fmt)
+}
+
+func withErrWriter(c *cli.Context) log.Option {
+	return log.WithWriter(c.App.ErrWriter)
 }

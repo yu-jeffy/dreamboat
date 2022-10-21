@@ -1,4 +1,4 @@
-package relay_test
+package datastore
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	relay "github.com/blocknative/dreamboat/pkg"
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
@@ -29,7 +30,7 @@ func TestPutGetHeader(t *testing.T) {
 	ds := relay.DefaultDatastore{TTLStorage: newMockDatastore()}
 
 	header := randomHeaderAndTrace()
-	slot := relay.Slot(rand.Int())
+	slot := structs.Slot(rand.Int())
 
 	// put
 	err := ds.PutHeader(ctx, slot, header, time.Minute)
@@ -65,7 +66,7 @@ func TestPutGetHeaderDuplicate(t *testing.T) {
 	ds := relay.DefaultDatastore{TTLStorage: newMockDatastore()}
 
 	header := randomHeaderAndTrace()
-	slot := relay.Slot(rand.Int())
+	slot := structs.Slot(rand.Int())
 
 	for i := 0; i < N; i++ {
 		// put
@@ -92,13 +93,13 @@ func TestPutGetHeaders(t *testing.T) {
 	ds := relay.DefaultDatastore{TTLStorage: newMockDatastore()}
 
 	headers := make([]relay.HeaderAndTrace, N)
-	slots := make([]relay.Slot, N)
+	slots := make([]structs.Slot, N)
 
 	var wg sync.WaitGroup
 	for i := 0; i < N; i++ {
 		go func(i int) {
 			header := randomHeaderAndTrace()
-			slot := relay.Slot(rand.Int())
+			slot := structs.Slot(rand.Int())
 			err := ds.PutHeader(ctx, slot, header, time.Minute)
 			require.NoError(t, err)
 			headers[i] = header
@@ -143,7 +144,7 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	d := relay.DefaultDatastore{TTLStorage: newMockDatastore()}
 
 	header := randomHeaderAndTrace()
-	slot := relay.Slot(rand.Int())
+	slot := structs.Slot(rand.Int())
 
 	// put
 	err := d.PutHeader(ctx, slot, header, time.Minute)
@@ -201,7 +202,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		header := randomHeaderAndTrace()
-		slot := relay.Slot(rand.Int())
+		slot := structs.Slot(rand.Int())
 
 		batch = append(batch, header)
 		queries = append(queries, relay.Query{Slot: slot})
@@ -264,7 +265,7 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		header := randomHeaderAndTrace()
-		slot := relay.Slot(header.Trace.Slot)
+		slot := structs.Slot(header.Trace.Slot)
 
 		headers = append(headers, header)
 		batch = append(batch, *header.Trace)
@@ -316,7 +317,7 @@ func TestPutGetPayload(t *testing.T) {
 	key := relay.PayloadKey{
 		BlockHash: payload.Trace.Message.BlockHash,
 		Proposer:  payload.Trace.Message.ProposerPubkey,
-		Slot:      relay.Slot(payload.Trace.Message.Slot),
+		Slot:      structs.Slot(payload.Trace.Message.Slot),
 	}
 	err := ds.PutPayload(ctx, key, payload, time.Minute)
 	require.NoError(t, err)

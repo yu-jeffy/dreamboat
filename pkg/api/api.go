@@ -1,15 +1,16 @@
-package relay
+package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
 	"strconv"
-	"strings"
 	"sync"
 
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/gorilla/mux"
 	"github.com/lthibault/log"
@@ -47,6 +48,22 @@ const (
 var (
 	ErrParamNotFound = errors.New("not found")
 )
+
+type RelayService interface {
+	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
+	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
+	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
+	GetPayload(context.Context, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
+
+	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
+	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
+	GetValidators() []types.BuilderGetValidatorsResponseEntry
+
+	// Data APIs
+	GetPayloadDelivered(context.Context, structs.TraceQuery) ([]structs.BidTraceExtended, error)
+	GetBlockReceived(context.Context, structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error)
+	Registration(context.Context, types.PublicKey) (types.SignedValidatorRegistration, error)
+}
 
 type API struct {
 	Service       RelayService
@@ -152,7 +169,7 @@ func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status 
 }
 
 func (a *API) getHeader(w http.ResponseWriter, r *http.Request) (int, error) {
-	response, err := a.Service.GetHeader(r.Context(), ParseHeaderRequest(r))
+	response, err := a.Service.GetHeader(r.Context(), parseHeaderRequest(r))
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
@@ -269,7 +286,7 @@ func (a *API) proposerPayloadsDelivered(w http.ResponseWriter, r *http.Request) 
 		return http.StatusBadRequest, err
 	}
 
-	query := TraceQuery{
+	query := structs.TraceQuery{
 		Slot:      slot,
 		BlockHash: bh,
 		BlockNum:  bn,
@@ -305,7 +322,7 @@ func (a *API) builderBlocksReceived(w http.ResponseWriter, r *http.Request) (int
 		limit = DataLimit
 	}
 
-	query := TraceQuery{
+	query := structs.TraceQuery{
 		Slot:      slot,
 		BlockHash: bh,
 		BlockNum:  bn,
@@ -330,15 +347,15 @@ func (a *API) respond(w http.ResponseWriter, v any, err error) (int, error) {
 	return 0, nil
 }
 
-func specificSlot(r *http.Request) (Slot, error) {
+func specificSlot(r *http.Request) (structs.Slot, error) {
 	if slotStr := r.URL.Query().Get("slot"); slotStr != "" {
 		slot, err := strconv.ParseUint(slotStr, 10, 64)
 		if err != nil {
-			return Slot(0), err
+			return structs.Slot(0), err
 		}
-		return Slot(slot), nil
+		return structs.Slot(slot), nil
 	}
-	return Slot(0), ErrParamNotFound
+	return structs.Slot(0), ErrParamNotFound
 }
 
 func blockHash(r *http.Request) (types.Hash, error) {
@@ -373,9 +390,9 @@ func blockNumber(r *http.Request) (uint64, error) {
 func limit(r *http.Request) (uint64, error) {
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		limit, err := strconv.ParseUint(limitStr, 10, 64)
-		if err != nil{
+		if err != nil {
 			return 0, err
-		} else if DataLimit<limit{
+		} else if DataLimit < limit {
 			return 0, fmt.Errorf("limit is higher than %d", DataLimit)
 		}
 		return limit, err
@@ -390,32 +407,11 @@ func cursor(r *http.Request) (uint64, error) {
 	return 0, ErrParamNotFound
 }
 
-type HeaderRequest map[string]string
-
-func ParseHeaderRequest(r *http.Request) HeaderRequest {
-	return mux.Vars(r)
-}
-
-func (hr HeaderRequest) Slot() (Slot, error) {
-	slot, err := strconv.Atoi(hr["slot"])
-	return Slot(slot), err
-}
-
-func (hr HeaderRequest) parentHash() (types.Hash, error) {
-	var parentHash types.Hash
-	err := parentHash.UnmarshalText([]byte(strings.ToLower(hr["parent_hash"])))
-	return parentHash, err
-}
-
-func (hr HeaderRequest) pubkey() (PubKey, error) {
-	var pk PubKey
-	if err := pk.UnmarshalText([]byte(strings.ToLower(hr["pubkey"]))); err != nil {
-		return PubKey{}, fmt.Errorf("invalid public key")
-	}
-	return pk, nil
-}
-
 type jsonError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+func parseHeaderRequest(r *http.Request) structs.HeaderRequest {
+	return mux.Vars(r)
 }

@@ -1,5 +1,5 @@
 //go:generate mockgen -source=service.go -destination=../internal/mock/pkg/service.go -package=mock_relay
-package relay
+package service
 
 import (
 	"context"
@@ -9,68 +9,62 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/types"
 	ds "github.com/ipfs/go-datastore"
-	badger "github.com/ipfs/go-ds-badger2"
 	"github.com/lthibault/log"
-	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/constraints"
 )
+
+type Datastore interface {
+	PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
+	GetHeaders(context.Context, Query) ([]structs.HeaderAndTrace, error)
+	GetHeaderBatch(context.Context, []Query) ([]structs.HeaderAndTrace, error)
+	PutDelivered(context.Context, structs.Slot, DeliveredTrace, time.Duration) error
+	GetDelivered(context.Context, Query) (structs.BidTraceWithTimestamp, error)
+	GetDeliveredBatch(context.Context, []Query) ([]structs.BidTraceWithTimestamp, error)
+	PutPayload(context.Context, PayloadKey, *structs.BlockBidAndTrace, time.Duration) error
+	GetPayload(context.Context, PayloadKey) (*structs.BlockBidAndTrace, error)
+	PutRegistration(context.Context, structs.PubKey, types.SignedValidatorRegistration, time.Duration) error
+	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
+}
 
 const (
 	Version = "0.2.0"
 )
 
-type RelayService interface {
-	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
-	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
-	GetHeader(context.Context, HeaderRequest) (*types.GetHeaderResponse, error)
-	GetPayload(context.Context, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
+/*
+type BuilderGetValidatorsResponseEntrySlice []types.BuilderGetValidatorsResponseEntry
 
-	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
-	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
-	GetValidators() BuilderGetValidatorsResponseEntrySlice
+func (b BuilderGetValidatorsResponseEntrySlice) Loggable() map[string]any {
+	return map[string]any{
+		"numDuties": len(b),
+	}
+}*/
 
-	// Data APIs
-	GetPayloadDelivered(context.Context, TraceQuery) ([]BidTraceExtended, error)
-	GetBlockReceived(context.Context, TraceQuery) ([]BidTraceWithTimestamp, error)
-	Registration(context.Context, types.PublicKey) (types.SignedValidatorRegistration, error)
+type Relay interface {
+	// Proposer APIs
+	RegisterValidator(context.Context, []types.SignedValidatorRegistration, State) error
+	GetHeader(context.Context, structs.HeaderRequest, State) (*types.GetHeaderResponse, error)
+	GetPayload(context.Context, *types.SignedBlindedBeaconBlock, State) (*types.GetPayloadResponse, error)
+
+	// Builder APIs
+	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest, State) error
+	GetValidators(State) []types.BuilderGetValidatorsResponseEntry
 }
 
-type TraceQuery struct {
-	Slot          Slot
-	BlockHash     types.Hash
-	BlockNum      uint64
-	Pubkey        types.PublicKey
-	Cursor, Limit uint64
-}
-
-func (q TraceQuery) HasSlot() bool {
-	return q.Slot != Slot(0)
-}
-
-func (q TraceQuery) HasBlockHash() bool {
-	return q.BlockHash != types.Hash{}
-}
-
-func (q TraceQuery) HasBlockNum() bool {
-	return q.BlockNum != 0
-}
-
-func (q TraceQuery) HasPubkey() bool {
-	return q.Pubkey != types.PublicKey{}
-}
-
-func (q TraceQuery) HasCursor() bool {
-	return q.Cursor != 0
-}
-
-func (q TraceQuery) HasLimit() bool {
-	return q.Limit != 0
+type BeaconClient interface {
+	SubscribeToHeadEvents(ctx context.Context, slotC chan HeadEvent)
+	GetProposerDuties(structs.Epoch) (*RegisteredProposersResponse, error)
+	SyncStatus() (*SyncStatusPayloadData, error)
+	KnownValidators(structs.Slot) (AllValidatorsResponse, error)
+	Endpoint() string
 }
 
 type DefaultService struct {
-	Log             log.Logger
-	Config          Config
+	Log log.Logger
+	TTL time.Duration
+
 	Relay           Relay
 	Storage         TTLStorage
 	Datastore       Datastore
@@ -81,74 +75,76 @@ type DefaultService struct {
 
 	// state
 	state        atomicState
-	headslotSlot Slot
+	headslotSlot structs.Slot
 	updateTime   atomic.Value
 }
 
+/*
 // Run creates a relay, datastore and starts the beacon client event loop
-func (s *DefaultService) Run(ctx context.Context) (err error) {
-	if s.Log == nil {
-		s.Log = log.New().WithField("service", "RelayService")
-	}
 
-	timeRelayStart := time.Now()
-	if s.Relay == nil {
-		s.Relay, err = NewRelay(s.Config)
-		if err != nil {
-			return
+	func (s *DefaultService) Run(ctx context.Context) (err error) {
+		if s.Log == nil {
+			s.Log = log.New().WithField("service", "RelayService")
 		}
-	}
-	s.Log.WithFields(logrus.Fields{
-		"service":     "relay",
-		"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
-	}).Info("initialized")
 
-	timeDataStoreStart := time.Now()
-	if s.Datastore == nil {
-		if s.Storage == nil {
-			storage, err := badger.NewDatastore(s.Config.Datadir, &badger.DefaultOptions)
+		timeRelayStart := time.Now()
+		if s.Relay == nil {
+			s.Relay, err = NewRelay(s.Config)
 			if err != nil {
-				s.Log.WithError(err).Fatal("failed to initialize datastore")
-				return err
+				return
 			}
-			s.Storage = &TTLDatastoreBatcher{storage}
 		}
+		s.Log.WithFields(logrus.Fields{
+			"service":     "relay",
+			"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
+		}).Info("initialized")
 
-		s.Datastore = &DefaultDatastore{TTLStorage: s.Storage}
-	}
-	s.Log.
-		WithFields(logrus.Fields{
-			"service":     "datastore",
-			"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
-		}).Info("data store initialized")
-
-	s.state.datastore.Store(s.Datastore)
-
-	if s.NewBeaconClient == nil {
-		s.NewBeaconClient = func() (BeaconClient, error) {
-			clients := make([]BeaconClient, 0, len(s.Config.BeaconEndpoints))
-			for _, endpoint := range s.Config.BeaconEndpoints {
-				client, err := NewBeaconClient(endpoint, s.Config)
+		timeDataStoreStart := time.Now()
+		if s.Datastore == nil {
+			if s.Storage == nil {
+				storage, err := badger.NewDatastore(s.Config.Datadir, &badger.DefaultOptions)
 				if err != nil {
-					return nil, err
+					s.Log.WithError(err).Fatal("failed to initialize datastore")
+					return err
 				}
-				clients = append(clients, client)
+				s.Storage = &TTLDatastoreBatcher{storage}
 			}
-			return NewMultiBeaconClient(s.Config.Log.WithField("service", "multi-beacon client"), clients), nil
+
+			s.Datastore = &datastore.Datastore{TTLStorage: s.Storage}
 		}
+		s.Log.
+			WithFields(logrus.Fields{
+				"service":     "datastore",
+				"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
+			}).Info("data store initialized")
+
+		s.state.datastore.Store(s.Datastore)
+
+		if s.NewBeaconClient == nil {
+			s.NewBeaconClient = func() (BeaconClient, error) {
+				clients := make([]BeaconClient, 0, len(s.Config.BeaconEndpoints))
+				for _, endpoint := range s.Config.BeaconEndpoints {
+					client, err := NewBeaconClient(endpoint, s.Config)
+					if err != nil {
+						return nil, err
+					}
+					clients = append(clients, client)
+				}
+				return NewMultiBeaconClient(s.Config.Log.WithField("service", "multi-beacon client"), clients), nil
+			}
+		}
+
+		client, err := s.NewBeaconClient()
+		if err != nil {
+			s.Log.WithError(err).Warn("failed beacon client registration")
+			return err
+		}
+
+		s.Log.Info("beacon client initialized")
+
+		return s.beaconEventLoop(ctx, client)
 	}
-
-	client, err := s.NewBeaconClient()
-	if err != nil {
-		s.Log.WithError(err).Warn("failed beacon client registration")
-		return err
-	}
-
-	s.Log.Info("beacon client initialized")
-
-	return s.beaconEventLoop(ctx, client)
-}
-
+*/
 func (s *DefaultService) Ready() <-chan struct{} {
 	s.once.Do(func() {
 		s.ready = make(chan struct{})
@@ -173,7 +169,7 @@ func (s *DefaultService) beaconEventLoop(ctx context.Context, client BeaconClien
 		return ErrBeaconNodeSyncing
 	}
 
-	err = s.updateProposerDuties(ctx, client, Slot(syncStatus.HeadSlot))
+	err = s.updateProposerDuties(ctx, client, structs.Slot(syncStatus.HeadSlot))
 	if err != nil {
 		return err
 	}
@@ -204,7 +200,7 @@ func (s *DefaultService) processNewSlot(ctx context.Context, client BeaconClient
 	logger := s.Log.WithField("method", "ProcessNewSlot")
 	timeStart := time.Now()
 
-	received := Slot(event.Slot)
+	received := structs.Slot(event.Slot)
 	if received <= s.headslotSlot {
 		return nil
 	}
@@ -220,7 +216,7 @@ func (s *DefaultService) processNewSlot(ctx context.Context, client BeaconClient
 	logger.With(log.F{
 		"epoch":              s.headslotSlot.Epoch(),
 		"slotHead":           s.headslotSlot,
-		"slotStartNextEpoch": Slot(s.headslotSlot.Epoch()+1) * SlotsPerEpoch,
+		"slotStartNextEpoch": structs.Slot(s.headslotSlot.Epoch()+1) * structs.SlotsPerEpoch,
 	},
 	).Debugf("updated headSlot to %d", received)
 
@@ -243,7 +239,7 @@ func (s *DefaultService) processNewSlot(ctx context.Context, client BeaconClient
 	logger.With(log.F{
 		"epoch":              s.headslotSlot.Epoch(),
 		"slotHead":           s.headslotSlot,
-		"slotStartNextEpoch": Slot(s.headslotSlot.Epoch()+1) * SlotsPerEpoch,
+		"slotStartNextEpoch": structs.Slot(s.headslotSlot.Epoch()+1) * structs.SlotsPerEpoch,
 		"slot":               uint64(s.headslotSlot),
 		"processingTimeMs":   time.Since(timeStart).Milliseconds(),
 	}).Info("updated head slot")
@@ -259,7 +255,7 @@ func (s *DefaultService) knownValidatorsUpdateTime() time.Time {
 	return updateTime
 }
 
-func (s *DefaultService) updateProposerDuties(ctx context.Context, client BeaconClient, headSlot Slot) error {
+func (s *DefaultService) updateProposerDuties(ctx context.Context, client BeaconClient, headSlot structs.Slot) error {
 	epoch := headSlot.Epoch()
 
 	logger := s.Log.With(log.F{
@@ -288,7 +284,7 @@ func (s *DefaultService) updateProposerDuties(ctx context.Context, client Beacon
 	}
 	entries = append(entries, next.Data...)
 
-	state.proposerDutiesResponse = make(BuilderGetValidatorsResponseEntrySlice, 0, len(entries))
+	state.proposerDutiesResponse = make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
 	state.currentSlot = headSlot
 
 	for _, e := range entries {
@@ -316,7 +312,7 @@ func (s *DefaultService) updateProposerDuties(ctx context.Context, client Beacon
 	return nil
 }
 
-func (s *DefaultService) updateKnownValidators(ctx context.Context, client BeaconClient, current Slot) error {
+func (s *DefaultService) updateKnownValidators(ctx context.Context, client BeaconClient, current structs.Slot) error {
 	logger := s.Log.WithField("method", "UpdateKnownValidators")
 	timeStart := time.Now()
 
@@ -351,7 +347,7 @@ func (s *DefaultService) RegisterValidator(ctx context.Context, payload []types.
 	return s.Relay.RegisterValidator(ctx, payload, &s.state)
 }
 
-func (s *DefaultService) GetHeader(ctx context.Context, request HeaderRequest) (*types.GetHeaderResponse, error) {
+func (s *DefaultService) GetHeader(ctx context.Context, request structs.HeaderRequest) (*types.GetHeaderResponse, error) {
 	return s.Relay.GetHeader(ctx, request, &s.state)
 }
 
@@ -363,13 +359,13 @@ func (s *DefaultService) SubmitBlock(ctx context.Context, submitBlockRequest *ty
 	return s.Relay.SubmitBlock(ctx, submitBlockRequest, &s.state)
 }
 
-func (s *DefaultService) GetValidators() BuilderGetValidatorsResponseEntrySlice {
+func (s *DefaultService) GetValidators() []types.BuilderGetValidatorsResponseEntry {
 	return s.Relay.GetValidators(&s.state)
 }
 
-func (s *DefaultService) GetPayloadDelivered(ctx context.Context, query TraceQuery) ([]BidTraceExtended, error) {
+func (s *DefaultService) GetPayloadDelivered(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceExtended, error) {
 	var (
-		event BidTraceWithTimestamp
+		event structs.BidTraceWithTimestamp
 		err   error
 	)
 
@@ -386,23 +382,30 @@ func (s *DefaultService) GetPayloadDelivered(ctx context.Context, query TraceQue
 	}
 
 	if err == nil {
-		return []BidTraceExtended{{BidTrace: event.BidTrace}}, err
+		return []structs.BidTraceExtended{{BidTrace: event.BidTrace}}, err
 	} else if errors.Is(err, ds.ErrNotFound) {
-		return []BidTraceExtended{}, nil
+		return []structs.BidTraceExtended{}, nil
 	}
 	return nil, err
 }
 
-func (s *DefaultService) getTailDelivered(ctx context.Context, limit, cursor uint64) ([]BidTraceExtended, error) {
+func min[T constraints.Ordered](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (s *DefaultService) getTailDelivered(ctx context.Context, limit, cursor uint64) ([]structs.BidTraceExtended, error) {
 	headSlot := s.state.Beacon().HeadSlot()
 	start := headSlot
 	if cursor != 0 {
-		start = min(headSlot, Slot(cursor))
+		start = min(headSlot, structs.Slot(cursor))
 	}
 
-	stop := start - Slot(s.Config.TTL/DurationPerSlot)
+	stop := start - structs.Slot(s.TTL/DurationPerSlot)
 
-	batch := make([]BidTraceWithTimestamp, 0, limit)
+	batch := make([]structs.BidTraceWithTimestamp, 0, limit)
 	queries := make([]Query, 0, limit)
 
 	s.Log.WithField("limit", limit).
@@ -410,9 +413,9 @@ func (s *DefaultService) getTailDelivered(ctx context.Context, limit, cursor uin
 		WithField("stop", stop).
 		Debug("querying delivered payload traces")
 
-	for highSlot := start; len(batch) < int(limit) && stop <= highSlot; highSlot -= Slot(limit) {
+	for highSlot := start; len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
 		queries = queries[:0]
-		for s := highSlot; highSlot-Slot(limit) < s && stop <= s; s-- {
+		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
 			queries = append(queries, Query{Slot: s})
 		}
 
@@ -424,16 +427,16 @@ func (s *DefaultService) getTailDelivered(ctx context.Context, limit, cursor uin
 		}
 	}
 
-	events := make([]BidTraceExtended, 0, len(batch))
+	events := make([]structs.BidTraceExtended, 0, len(batch))
 	for _, event := range batch {
 		events = append(events, event.BidTraceExtended)
 	}
 	return events, nil
 }
 
-func (s *DefaultService) GetBlockReceived(ctx context.Context, query TraceQuery) ([]BidTraceWithTimestamp, error) {
+func (s *DefaultService) GetBlockReceived(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error) {
 	var (
-		events []HeaderAndTrace
+		events []structs.HeaderAndTrace
 		err    error
 	)
 
@@ -448,20 +451,20 @@ func (s *DefaultService) GetBlockReceived(ctx context.Context, query TraceQuery)
 	}
 
 	if err == nil {
-		traces := make([]BidTraceWithTimestamp, 0, len(events))
+		traces := make([]structs.BidTraceWithTimestamp, 0, len(events))
 		for _, event := range events {
 			traces = append(traces, *event.Trace)
 		}
 		return traces, err
 	} else if errors.Is(err, ds.ErrNotFound) {
-		return []BidTraceWithTimestamp{}, nil
+		return []structs.BidTraceWithTimestamp{}, nil
 	}
 	return nil, err
 }
 
-func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64) ([]BidTraceWithTimestamp, error) {
-	batch := make([]HeaderAndTrace, 0, limit)
-	stop := s.state.Beacon().HeadSlot() - Slot(s.Config.TTL/DurationPerSlot)
+func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64) ([]structs.BidTraceWithTimestamp, error) {
+	batch := make([]structs.HeaderAndTrace, 0, limit)
+	stop := s.state.Beacon().HeadSlot() - structs.Slot(s.TTL/DurationPerSlot)
 	queries := make([]Query, 0)
 
 	s.Log.WithField("limit", limit).
@@ -469,9 +472,9 @@ func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64)
 		WithField("stop", stop).
 		Debug("querying received block traces")
 
-	for highSlot := s.state.Beacon().HeadSlot(); len(batch) < int(limit) && stop <= highSlot; highSlot -= Slot(limit) {
+	for highSlot := s.state.Beacon().HeadSlot(); len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
 		queries = queries[:0]
-		for s := highSlot; highSlot-Slot(limit) < s && stop <= s; s-- {
+		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
 			queries = append(queries, Query{Slot: s})
 		}
 
@@ -483,7 +486,7 @@ func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64)
 		}
 	}
 
-	events := make([]BidTraceWithTimestamp, 0, len(batch))
+	events := make([]structs.BidTraceWithTimestamp, 0, len(batch))
 	for _, event := range batch {
 		events = append(events, *event.Trace)
 	}
@@ -491,7 +494,7 @@ func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64)
 }
 
 func (s *DefaultService) Registration(ctx context.Context, pk types.PublicKey) (types.SignedValidatorRegistration, error) {
-	return s.Datastore.GetRegistration(ctx, PubKey{pk})
+	return s.Datastore.GetRegistration(ctx, structs.PubKey{pk})
 }
 
 type atomicState struct {
@@ -530,17 +533,17 @@ func (s beaconState) KnownValidators() map[types.PubkeyHex]struct{} {
 	return s.knownValidators
 }
 
-func (s beaconState) HeadSlot() Slot {
+func (s beaconState) HeadSlot() structs.Slot {
 	return s.currentSlot
 }
 
-func (s beaconState) ValidatorsMap() BuilderGetValidatorsResponseEntrySlice {
+func (s beaconState) ValidatorsMap() []types.BuilderGetValidatorsResponseEntry {
 	return s.proposerDutiesResponse
 }
 
 type dutiesState struct {
-	currentSlot            Slot
-	proposerDutiesResponse BuilderGetValidatorsResponseEntrySlice
+	currentSlot            structs.Slot
+	proposerDutiesResponse []types.BuilderGetValidatorsResponseEntry
 }
 
 type validatorsState struct {
