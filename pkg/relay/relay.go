@@ -30,6 +30,11 @@ var (
 	badHeaderMsg             = "invalid block header from datastore"
 )
 
+const (
+	DurationPerSlot  = time.Second * 12
+	DurationPerEpoch = DurationPerSlot * time.Duration(structs.SlotsPerEpoch)
+)
+
 /*
 type State interface {
 	Datastore() Datastore
@@ -41,11 +46,12 @@ type RelayDatastore interface {
 	// PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
 	//GetHeaders(context.Context, Query) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlot(context.Context, structs.Slot) ([]structs.HeaderAndTrace, error)
+	GetHeadersBySlots(context.Context, []structs.Slot) ([]structs.HeaderAndTrace, error)
 	// GetHeaderBatch(context.Context, []Query) ([]structs.HeaderAndTrace, error)
 
 	PutDelivered(context.Context, structs.Slot, structs.DeliveredTrace, time.Duration) error
 	GetDeliveredBySlot(context.Context, structs.Slot) (structs.BidTraceWithTimestamp, error)
-	// GetDeliveredBatch(context.Context, []Query) ([]structs.BidTraceWithTimestamp, error)
+	GetDeliveredBySlots(context.Context, []structs.Slot) ([]structs.BidTraceWithTimestamp, error)
 	PutPayload(context.Context, ds.Key, *structs.BlockBidAndTrace, time.Duration) error
 	GetPayload(context.Context, ds.Key) (*structs.BlockBidAndTrace, error)
 	PutRegistration(context.Context, structs.PubKey, types.SignedValidatorRegistration, time.Duration) error
@@ -61,14 +67,16 @@ type BeaconState interface {
 
 type Relay struct {
 	//config                Config
-	l                     log.Logger
+	l log.Logger
+
+	TTL                   time.Duration
 	store                 RelayDatastore
 	builderSigningDomain  types.Domain
 	proposerSigningDomain types.Domain
 }
 
 // NewRelay relay service
-func NewRelay(config config.Config, l log.Logger) (*Relay, error) {
+func NewRelay(config config.Config, l log.Logger, store RelayDatastore) (*Relay, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
@@ -83,13 +91,13 @@ func NewRelay(config config.Config, l log.Logger) (*Relay, error) {
 		return nil, err
 	}
 
-	rs := &Relay{
+	return &Relay{
 		l:                     l,
 		config:                config,
+		store:                 store,
 		builderSigningDomain:  domainBuilder,
 		proposerSigningDomain: domainBeaconProposer,
-	}
-	return rs, nil
+	}, nil
 }
 
 // verifyTimestamp ensures timestamp is not too far in the future
@@ -100,7 +108,7 @@ func verifyTimestamp(timestamp uint64) bool {
 // ***** Builder Domain *****
 
 // RegisterValidator is called is called by validators communicating through mev-boost who would like to receive a block from us when their slot is scheduled
-func (rs *Relay) RegisterValidator(ctx context.Context, payload []types.SignedValidatorRegistration, state State) error {
+func (rs *Relay) RegisterValidator(ctx context.Context, payload []types.SignedValidatorRegistration) error {
 	logger := rs.l.WithField("method", "RegisterValidator")
 	timeStart := time.Now()
 
@@ -131,7 +139,7 @@ func (rs *Relay) RegisterValidator(ctx context.Context, payload []types.SignedVa
 	return nil
 }
 
-func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedValidatorRegistration, state State) error {
+func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedValidatorRegistration) error {
 	logger := rs.l.WithField("method", "RegisterValidator")
 	timeStart := time.Now()
 
@@ -214,7 +222,7 @@ func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedVal
 }
 
 // GetHeader is called by a block proposer communicating through mev-boost and returns a bid along with an execution payload header
-func (rs *Relay) GetHeader(ctx context.Context, request structs.HeaderRequest, state State) (*types.GetHeaderResponse, error) {
+func (rs *Relay) GetHeader(ctx context.Context, request structs.HeaderRequest) (*types.GetHeaderResponse, error) {
 	logger := rs.l.WithField("method", "GetHeader")
 	timeStart := time.Now()
 
@@ -251,7 +259,7 @@ func (rs *Relay) GetHeader(ctx context.Context, request structs.HeaderRequest, s
 		return nil, fmt.Errorf("unknown validator")
 	}
 
-	headers, err := rs.store.GetHeadersBySlot(ctx, structs.Query{Slot: slot})
+	headers, err := rs.store.GetHeadersBySlot(ctx, slot)
 	if err != nil || len(headers) < 1 {
 		logger.Warn(noBuilderBidMsg)
 		return nil, fmt.Errorf(noBuilderBidMsg)
@@ -533,7 +541,7 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 
 // GetValidators returns a list of registered block proposers in current and next epoch
 func (rs *Relay) GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry {
-	log := rs.Log().WithField("method", "GetValidators")
+	log := rs.l.WithField("method", "GetValidators")
 	validators := state.Beacon().ValidatorsMap()
 	log.With(validators).Debug("validatored map sent")
 	return validators
@@ -598,4 +606,137 @@ func ComputeDomain(domainType types.DomainType, forkVersionHex string, genesisVa
 	var forkVersion [4]byte
 	copy(forkVersion[:], forkVersionBytes[:4])
 	return types.ComputeDomain(domainType, forkVersion, genesisValidatorsRoot), nil
+}
+
+func (rs *Relay) GetPayloadDelivered(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceExtended, error) {
+	var (
+		event structs.BidTraceWithTimestamp
+		err   error
+	)
+
+	if query.HasSlot() {
+		event, err = rs.store.GetDelivered(ctx, Query{Slot: query.Slot})
+	} else if query.HasBlockHash() {
+		event, err = rs.store.GetDelivered(ctx, Query{BlockHash: query.BlockHash})
+	} else if query.HasBlockNum() {
+		event, err = rs.store.GetDelivered(ctx, Query{BlockNum: query.BlockNum})
+	} else if query.HasPubkey() {
+		event, err = rs.store.GetDelivered(ctx, Query{PubKey: query.Pubkey})
+	} else {
+		headSlot := rs.state.Beacon().HeadSlot()
+		return rs.getTailDelivered(ctx, headSlot, query.Limit, query.Cursor, rs.TTL)
+	}
+
+	if err == nil {
+		return []structs.BidTraceExtended{{BidTrace: event.BidTrace}}, err
+	} else if errors.Is(err, ds.ErrNotFound) {
+		return []structs.BidTraceExtended{}, nil
+	}
+	return nil, err
+}
+
+func (rs *Relay) getTailDelivered(ctx context.Context, headSlot structs.Slot, limit, cursor uint64, ttl time.Duration) ([]structs.BidTraceExtended, error) {
+	start := headSlot
+	if cursor != 0 {
+		start = structs.Slot(cursor)
+		if headSlot < structs.Slot(cursor) {
+			start = headSlot
+		}
+	}
+
+	stop := start - structs.Slot(ttl/DurationPerSlot)
+
+	batch := make([]structs.BidTraceWithTimestamp, 0, limit)
+	//queries := make([]Query, 0, limit)
+	slots := make([]structs.Slot, 0, limit)
+
+	rs.l.WithField("limit", limit).
+		WithField("start", start).
+		WithField("stop", stop).
+		Debug("querying delivered payload traces")
+
+	for highSlot := start; len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
+		slots = slots[:0]
+		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
+			//queries = append(queries, Query{Slot: s})
+			slots = append(slots, s)
+		}
+
+		nextBatch, err := rs.store.GetDeliveredBySlots(ctx, slots)
+		if err != nil {
+			rs.l.WithError(err).Warn("failed getting header batch")
+		} else {
+			batch = append(batch, nextBatch[:min(int(limit)-len(batch), len(nextBatch))]...)
+		}
+	}
+
+	events := make([]structs.BidTraceExtended, 0, len(batch))
+	for _, event := range batch {
+		events = append(events, event.BidTraceExtended)
+	}
+	return events, nil
+}
+
+func (rs *Relay) GetBlockReceived(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error) {
+	var (
+		events []structs.HeaderAndTrace
+		err    error
+	)
+
+	if query.HasSlot() {
+		events, err = rs.store.GetHeaders(ctx, Query{Slot: query.Slot})
+	} else if query.HasBlockHash() {
+		events, err = rs.store.GetHeaders(ctx, Query{BlockHash: query.BlockHash})
+	} else if query.HasBlockNum() {
+		events, err = rs.store.GetHeaders(ctx, Query{BlockNum: query.BlockNum})
+	} else {
+		hs := rs.state.Beacon().HeadSlot()
+		return rs.getTailBlockReceived(ctx, hs, query.Limit)
+	}
+
+	if err == nil {
+		traces := make([]structs.BidTraceWithTimestamp, 0, len(events))
+		for _, event := range events {
+			traces = append(traces, *event.Trace)
+		}
+		return traces, err
+	} else if errors.Is(err, ds.ErrNotFound) {
+		return []structs.BidTraceWithTimestamp{}, nil
+	}
+	return nil, err
+}
+
+func (rs *Relay) getTailBlockReceived(ctx context.Context, headslot structs.Slot, limit uint64) ([]structs.BidTraceWithTimestamp, error) {
+	batch := make([]structs.HeaderAndTrace, 0, limit)
+	stop := headslot - structs.Slot(s.TTL/DurationPerSlot)
+	queries := make([]Query, 0)
+
+	s.Log.WithField("limit", limit).
+		WithField("start", s.state.Beacon().HeadSlot()).
+		WithField("stop", stop).
+		Debug("querying received block traces")
+
+	for highSlot := s.state.Beacon().HeadSlot(); len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
+		queries = queries[:0]
+		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
+			queries = append(queries, Query{Slot: s})
+		}
+
+		nextBatch, err := rs.store.GetHeaderBatch(ctx, queries)
+		if err != nil {
+			s.Log.WithError(err).Warn("failed getting header batch")
+		} else {
+			batch = append(batch, nextBatch[:min(int(limit)-len(batch), len(nextBatch))]...)
+		}
+	}
+
+	events := make([]structs.BidTraceWithTimestamp, 0, len(batch))
+	for _, event := range batch {
+		events = append(events, *event.Trace)
+	}
+	return events, nil
+}
+
+func (s *Relay) Registration(ctx context.Context, pk structs.PubKey) (types.SignedValidatorRegistration, error) {
+	return s.store.GetRegistration(ctx, pk)
 }

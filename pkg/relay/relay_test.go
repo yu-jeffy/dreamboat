@@ -794,3 +794,130 @@ func (s state) Datastore() relay.Datastore {
 func (s state) Beacon() relay.BeaconState {
 	return s.bc
 }
+
+/// MOVED FROM SERVICE
+
+func TestServiceRouting(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	t.Run("Status", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			GetHeader(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		service.GetHeader(nil, nil)
+	})
+
+	t.Run("RegisterValidator", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			RegisterValidator(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		service.RegisterValidator(ctx, nil)
+
+	})
+
+	t.Run("GetHeader", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			GetHeader(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		service.GetHeader(ctx, nil)
+	})
+
+	t.Run("GetPayload", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			GetPayload(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		service.GetPayload(ctx, nil)
+	})
+
+	t.Run("SubmitBlock", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			SubmitBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		service.SubmitBlock(ctx, nil)
+	})
+
+	t.Run("GetValidators", func(t *testing.T) {
+		t.Parallel()
+
+		relayMock := mock_relay.NewMockRelay(ctrl)
+		service := relay.DefaultService{
+			Relay: relayMock,
+			NewBeaconClient: func() (relay.BeaconClient, error) {
+				return nil, nil
+			},
+			Datastore: &relay.DefaultDatastore{TTLStorage: newMockDatastore()},
+		}
+
+		relayMock.EXPECT().
+			GetValidators(gomock.Any()).
+			Times(1)
+
+		service.GetValidators()
+	})
+}

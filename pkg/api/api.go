@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/pprof"
 	"strconv"
-	"sync"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/types"
@@ -49,7 +47,7 @@ var (
 	ErrParamNotFound = errors.New("not found")
 )
 
-type RelayService interface {
+type Relay interface {
 	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
 	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
 	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
@@ -62,68 +60,53 @@ type RelayService interface {
 	// Data APIs
 	GetPayloadDelivered(context.Context, structs.TraceQuery) ([]structs.BidTraceExtended, error)
 	GetBlockReceived(context.Context, structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error)
-	Registration(context.Context, types.PublicKey) (types.SignedValidatorRegistration, error)
+	Registration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
 }
 
 type API struct {
-	Service       RelayService
-	Log           log.Logger
-	EnableProfile bool
-	once          sync.Once
-	mux           http.Handler
+	relay Relay
+	l     log.Logger
 }
 
-func (a *API) init() {
-	a.once.Do(func() {
-		if a.Log == nil {
-			a.Log = log.New()
-		}
+func NewApi(l log.Logger, relay Relay) (a *API) {
 
-		router := mux.NewRouter()
-		router.Use(
-			withDrainBody(),
-			mux.CORSMethodMiddleware(router),
-			withContentType("application/json"),
-			withLogger(a.Log)) // set middleware
-
-		// root returns 200 - nil
-		router.HandleFunc("/", succeed(http.StatusOK))
-
-		// proposer related
-		router.HandleFunc(PathStatus, succeed(http.StatusOK)).Methods(http.MethodGet)
-		router.HandleFunc(PathRegisterValidator, handler(a.registerValidator)).Methods(http.MethodPost)
-		router.HandleFunc(PathGetHeader, handler(a.getHeader)).Methods(http.MethodGet)
-		router.HandleFunc(PathGetPayload, handler(a.getPayload)).Methods(http.MethodPost)
-
-		// builder related
-		router.HandleFunc(PathSubmitBlock, handler(a.submitBlock)).Methods(http.MethodPost)
-		router.HandleFunc(PathGetValidators, handler(a.getValidators)).Methods(http.MethodGet)
-
-		// data API related
-		router.HandleFunc(PathProposerPayloadsDelivered, handler(a.proposerPayloadsDelivered)).Methods(http.MethodGet)
-		router.HandleFunc(PathBuilderBlocksReceived, handler(a.builderBlocksReceived)).Methods(http.MethodGet)
-		router.HandleFunc(PathSpecificRegistration, handler(a.specificRegistration)).Methods(http.MethodGet)
-
-		// add tracer if enabled
-		if a.EnableProfile {
-			router.HandleFunc(PathPprofCmdline, pprof.Cmdline)
-			router.HandleFunc(PathPprofSymbol, pprof.Symbol)
-			router.HandleFunc(PathPprofTrace, pprof.Trace)
-			router.HandleFunc(PathPprofProfile, pprof.Profile)
-			router.PathPrefix(PathPprofIndex).HandlerFunc(pprof.Index)
-		}
-
-		router.Use(mux.CORSMethodMiddleware(router))
-
-		a.mux = router
-	})
-
+	return &API{l: l, relay: relay}
 }
 
-func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	a.init()
-	a.mux.ServeHTTP(w, r)
+func (a *API) AttachToHandler(m *http.ServeMux) {
+
+	router := mux.NewRouter()
+	router.Use(
+		withDrainBody(),
+		mux.CORSMethodMiddleware(router),
+		withContentType("application/json"),
+		withLogger(a.l)) // set middleware
+
+	// root returns 200 - nil
+	router.HandleFunc("/", succeed(http.StatusOK))
+
+	// proposer related
+	router.HandleFunc(PathStatus, succeed(http.StatusOK)).Methods(http.MethodGet)
+	router.HandleFunc(PathRegisterValidator, handler(a.registerValidator)).Methods(http.MethodPost)
+	router.HandleFunc(PathGetHeader, handler(a.getHeader)).Methods(http.MethodGet)
+	router.HandleFunc(PathGetPayload, handler(a.getPayload)).Methods(http.MethodPost)
+
+	// builder related
+	router.HandleFunc(PathSubmitBlock, handler(a.submitBlock)).Methods(http.MethodPost)
+	router.HandleFunc(PathGetValidators, handler(a.getValidators)).Methods(http.MethodGet)
+
+	// data API related
+	router.HandleFunc(PathProposerPayloadsDelivered, handler(a.proposerPayloadsDelivered)).Methods(http.MethodGet)
+	router.HandleFunc(PathBuilderBlocksReceived, handler(a.builderBlocksReceived)).Methods(http.MethodGet)
+	router.HandleFunc(PathSpecificRegistration, handler(a.specificRegistration)).Methods(http.MethodGet)
+
+	router.Use(mux.CORSMethodMiddleware(router))
+	m.Handle("/", router)
 }
+
+//func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+//	a.mux.ServeHTTP(w, r)
+//}
 
 func handler(f func(http.ResponseWriter, *http.Request) (int, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -153,14 +136,13 @@ func succeed(status int) http.HandlerFunc {
 }
 
 // proposer related handlers
-
 func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status int, err error) {
 	payload := []types.SignedValidatorRegistration{}
 	if err = json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		return http.StatusBadRequest, errors.New("invalid payload")
 	}
 
-	err = a.Service.RegisterValidator(r.Context(), payload)
+	err = a.relay.RegisterValidator(r.Context(), payload)
 	if err != nil {
 		status = http.StatusBadRequest
 	}
@@ -169,13 +151,13 @@ func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status 
 }
 
 func (a *API) getHeader(w http.ResponseWriter, r *http.Request) (int, error) {
-	response, err := a.Service.GetHeader(r.Context(), parseHeaderRequest(r))
+	response, err := a.relay.GetHeader(r.Context(), parseHeaderRequest(r))
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
 
 	if err = json.NewEncoder(w).Encode(response); err != nil {
-		a.Log.WithError(err).
+		a.l.WithError(err).
 			WithField("path", r.URL.Path).
 			Debug("failed to write response")
 		return http.StatusInternalServerError, err
@@ -190,13 +172,13 @@ func (a *API) getPayload(w http.ResponseWriter, r *http.Request) (int, error) {
 		return http.StatusBadRequest, errors.New("invalid payload")
 	}
 
-	payload, err := a.Service.GetPayload(r.Context(), &block)
+	payload, err := a.relay.GetPayload(r.Context(), &block)
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
 
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		a.Log.WithError(err).
+		a.l.WithError(err).
 			WithField("path", r.URL.Path).
 			Debug("failed to write response")
 		return http.StatusInternalServerError, err
@@ -213,7 +195,7 @@ func (a *API) submitBlock(w http.ResponseWriter, r *http.Request) (int, error) {
 		return http.StatusBadRequest, err
 	}
 
-	if err := a.Service.SubmitBlock(r.Context(), &br); err != nil {
+	if err := a.relay.SubmitBlock(r.Context(), &br); err != nil {
 		return http.StatusBadRequest, err
 	}
 
@@ -221,9 +203,9 @@ func (a *API) submitBlock(w http.ResponseWriter, r *http.Request) (int, error) {
 }
 
 func (a *API) getValidators(w http.ResponseWriter, r *http.Request) (int, error) {
-	vs := a.Service.GetValidators()
+	vs := a.relay.GetValidators()
 	if vs == nil {
-		a.Log.Trace("no registered validators for epoch")
+		a.l.Trace("no registered validators for epoch")
 	}
 
 	if err := json.NewEncoder(w).Encode(vs); err != nil {
@@ -243,7 +225,7 @@ func (a *API) specificRegistration(w http.ResponseWriter, r *http.Request) (int,
 		return http.StatusBadRequest, err
 	}
 
-	registration, err := a.Service.Registration(r.Context(), pk)
+	registration, err := a.relay.Registration(r.Context(), structs.PubKey{pk})
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
@@ -295,7 +277,7 @@ func (a *API) proposerPayloadsDelivered(w http.ResponseWriter, r *http.Request) 
 		Limit:     limit,
 	}
 
-	blocks, err := a.Service.GetPayloadDelivered(r.Context(), query)
+	blocks, err := a.relay.GetPayloadDelivered(r.Context(), query)
 	return a.respond(w, blocks, err)
 }
 
@@ -329,7 +311,7 @@ func (a *API) builderBlocksReceived(w http.ResponseWriter, r *http.Request) (int
 		Limit:     limit,
 	}
 
-	blocks, err := a.Service.GetBlockReceived(r.Context(), query)
+	blocks, err := a.relay.GetBlockReceived(r.Context(), query)
 	return a.respond(w, blocks, err)
 }
 

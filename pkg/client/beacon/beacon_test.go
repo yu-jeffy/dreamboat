@@ -1,4 +1,4 @@
-package relay_test
+package beacon
 
 import (
 	"context"

@@ -2,34 +2,34 @@ package main
 
 import (
 	"context"
+
 	"net"
 	"net/http"
 	"os"
 
 	"time"
 
-	"github.com/lthibault/log"
-
 	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
+	"github.com/blocknative/dreamboat/pkg/api"
+	"github.com/blocknative/dreamboat/pkg/beacon"
+	beaconCli "github.com/blocknative/dreamboat/pkg/client/beacon"
 	"github.com/blocknative/dreamboat/pkg/relay"
-	"github.com/blocknative/dreamboat/pkg/service"
-	badger "github.com/ipfs/go-ds-badger2"
-	"github.com/sirupsen/logrus"
+	"github.com/blocknative/dreamboat/pkg/store/datastore"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
+
+	badger "github.com/ipfs/go-ds-badger2"
+	"github.com/lthibault/log"
 	blst "github.com/supranational/blst/bindings/go"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/blocknative/dreamboat/pkg/api"
-	"github.com/blocknative/dreamboat/pkg/store/datastore"
 )
 
 const (
 	shutdownTimeout = 5 * time.Second
-	version         = relay.Version
+	version         = "0.2.0"
 )
 
 var flags = []cli.Flag{
@@ -175,83 +175,65 @@ func run() cli.ActionFunc {
 	return func(c *cli.Context) error {
 		g, ctx := errgroup.WithContext(c.Context)
 
-		l := log.New().WithField("service", "RelayService")
+		l := log.New() //.WithField("service", "RelayService")
 
-		// setup the relay service
-		service := &service.DefaultService{
-			Log: l,
-			TTL: c.Duration("ttl"),
+		// DATASTORE INITIALIZATION
+
+		storage, err := badger.NewDatastore(cfg.Datadir, &badger.DefaultOptions)
+		if err != nil {
+			l.WithError(err).Fatal("failed to initialize datastore")
+			return err
 		}
+		store := datastore.NewDatastore(storage)
+		defer store.Close()
 
-		timeRelayStart := time.Now()
-		if s.Relay == nil {
-			s.Relay, err = relay.NewRelay(s.Config)
+		// BEACON MANAGER INITIALIZATION
+
+		clients := make([]*beaconCli.BeaconClient, 0, len(cfg.BeaconEndpoints))
+		for _, endpoint := range cfg.BeaconEndpoints {
+			client, err := beaconCli.NewBeaconClient(endpoint, l)
 			if err != nil {
-				return
-			}
-		}
-		l.WithFields(logrus.Fields{
-			"service":     "relay",
-			"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
-		}).Info("initialized")
-
-		timeDataStoreStart := time.Now()
-		if s.Datastore == nil {
-			if s.Storage == nil {
-				storage, err := badger.NewDatastore(s.Config.Datadir, &badger.DefaultOptions)
-				if err != nil {
-					s.Log.WithError(err).Fatal("failed to initialize datastore")
-					return err
-				}
-				s.Storage = &TTLDatastoreBatcher{storage}
-			}
-
-			s.Datastore = &datastore.Datastore{TTLStorage: s.Storage}
-		}
-		l.
-			WithFields(logrus.Fields{
-				"service":     "datastore",
-				"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
-			}).Info("data store initialized")
-
-		s.state.datastore.Store(s.Datastore)
-
-		if s.NewBeaconClient == nil {
-			s.NewBeaconClient = func() (BeaconClient, error) {
-				clients := make([]BeaconClient, 0, len(s.Config.BeaconEndpoints))
-				for _, endpoint := range s.Config.BeaconEndpoints {
-					client, err := NewBeaconClient(endpoint, s.Config)
-					if err != nil {
-						return nil, err
-					}
-					clients = append(clients, client)
-				}
-				return NewMultiBeaconClient(s.Config.Log.WithField("service", "multi-beacon client"), clients), nil
-			}
-		}
-
-		g.Go(func() error {
-
-			client, err := s.NewBeaconClient()
-			if err != nil {
-				l.WithError(err).Warn("failed beacon client registration")
 				return err
 			}
-
-			l.Info("beacon client initialized")
-
-			return s.beaconEventLoop(ctx, client)
-
-			//return service.Run(ctx)
-		})
-
-		// wait for the relay service to be ready
-		select {
-		case <-service.Ready():
-		case <-ctx.Done():
-			return g.Wait()
+			clients = append(clients, client)
 		}
 
+		multiBClient := beacon.NewMultiBeaconClient(l.WithField("service", "multi-beacon client"), clients)
+		/*if err != nil {
+			l.WithError(err).Warn("failed beacon client registration")
+			return err
+		}*/
+
+		l.Info("beacon client initialized")
+
+		bm := beacon.NewBeaconManager(l, multiBClient)
+		go bm.BeaconEventLoop(ctx)
+
+		// RELAY INITIALIZATION
+
+		r, err := relay.NewRelay(cfg, l, store)
+		r.TTL = c.Duration("ttl")
+		if err != nil {
+			return err
+		}
+		/*
+			l.WithFields(logrus.Fields{
+				"service":     "relay",
+				"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
+			}).Info("initialized")
+
+			timeDataStoreStart := time.Now()
+
+			l.
+				WithFields(logrus.Fields{
+					"service":     "datastore",
+					"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
+				}).Info("data store initialized")
+		*/
+
+		api := api.NewApi(l, r)
+		mux := http.NewServeMux()
+		api.AttachToHandler(mux)
 		l.Debug("relay service ready")
 
 		svr := http.Server{
@@ -260,39 +242,23 @@ func run() cli.ActionFunc {
 			WriteTimeout:   c.Duration("timeout"),
 			IdleTimeout:    time.Second * 2,
 			MaxHeaderBytes: 4096,
+			Handler:        mux,
+			BaseContext: func(l net.Listener) context.Context { // TODO(l): remove this
+				return ctx
+			},
 		}
 
-		// run the http server
-		g.Go(func() (err error) {
-			svr.BaseContext = func(l net.Listener) context.Context {
-				return ctx
-			}
+		g.Go(func() error {
+			defer svr.Close()
+			<-ctx.Done()
 
-			svr.Handler = &api.API{
-				Service:       service,
-				Log:           l,
-				EnableProfile: c.Bool("profile"),
-			}
+			ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
 
-			l.Info("http server listening")
-			if err = svr.ListenAndServe(); err == http.ErrServerClosed {
-				err = nil
-			}
-
-			return err
+			return svr.Shutdown(ctx)
 		})
 
-		//g.Go(func() error {
-
-		defer svr.Close()
-		<-ctx.Done()
-
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		svr.Shutdown(ctx)
-		//})
-
-		//return g.Wait()
+		l.Info("http server listening")
+		return svr.ListenAndServe()
 	}
 }

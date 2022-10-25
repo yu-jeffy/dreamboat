@@ -9,13 +9,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/lthibault/log"
 	"github.com/r3labs/sse/v2"
-	uberatomic "go.uber.org/atomic"
 )
 
 var (
@@ -23,167 +21,28 @@ var (
 )
 
 var (
-	//
-	DurationPerSlot  = time.Second * 12
-	DurationPerEpoch = DurationPerSlot * time.Duration(structs.SlotsPerEpoch)
-	//_                    BeaconClient = (*beaconClient)(nil) // type constraint
 	ErrHTTPErrorResponse = errors.New("got an HTTP error response")
 	ErrNodesUnavailable  = errors.New("beacon nodes are unavailable")
 )
 
-type MultiBeaconClient struct {
-	Log     log.Logger
-	Clients []BeaconClient
-
-	bestBeaconIndex uberatomic.Int64
-}
-
-func NewMultiBeaconClient(l log.Logger, clients []BeaconClient) BeaconClient {
-	if l == nil {
-		l = log.New().WithField("service", "multi-beacon client")
-	}
-	return &MultiBeaconClient{Log: l, Clients: clients}
-}
-
-func (b *MultiBeaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan HeadEvent) {
-	for _, client := range b.Clients {
-		go client.SubscribeToHeadEvents(ctx, slotC)
-	}
-}
-
-func (b *MultiBeaconClient) GetProposerDuties(epoch structs.Epoch) (*RegisteredProposersResponse, error) {
-	// return the first successful beacon node response
-	clients := b.clientsByLastResponse()
-
-	for i, client := range clients {
-		log := b.Log.WithField("endpoint", client.Endpoint())
-
-		duties, err := client.GetProposerDuties(epoch)
-		if err != nil {
-			log.WithError(err).Error("failed to get proposer duties")
-			continue
-		}
-
-		b.bestBeaconIndex.Store(int64(i))
-
-		// Received successful response. Set this index as last successful beacon node
-		return duties, nil
-	}
-
-	return nil, ErrNodesUnavailable
-}
-
-func (b *MultiBeaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
-	var bestSyncStatus *SyncStatusPayloadData
-	var foundSyncedNode bool
-
-	// Check each beacon-node sync status
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, instance := range b.Clients {
-		wg.Add(1)
-		go func(client BeaconClient) {
-			defer wg.Done()
-			log := b.Log.WithField("endpoint", client.Endpoint())
-
-			syncStatus, err := client.SyncStatus()
-			if err != nil {
-				log.WithError(err).Error("failed to get sync status")
-				return
-			}
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if foundSyncedNode {
-				return
-			}
-
-			if bestSyncStatus == nil {
-				bestSyncStatus = syncStatus
-			}
-
-			if !syncStatus.IsSyncing {
-				bestSyncStatus = syncStatus
-				foundSyncedNode = true
-			}
-		}(instance)
-	}
-
-	// Wait for all requests to complete...
-	wg.Wait()
-
-	if !foundSyncedNode {
-		return nil, ErrBeaconNodeSyncing
-	}
-
-	if bestSyncStatus == nil {
-		return nil, ErrNodesUnavailable
-	}
-
-	return bestSyncStatus, nil
-}
-
-func (b *MultiBeaconClient) KnownValidators(headSlot structs.Slot) (AllValidatorsResponse, error) {
-	// return the first successful beacon node response
-	clients := b.clientsByLastResponse()
-
-	for i, client := range clients {
-		log := b.Log.WithField("endpoint", client.Endpoint())
-
-		validators, err := client.KnownValidators(headSlot)
-		if err != nil {
-			log.WithError(err).Error("failed to fetch validators")
-			continue
-		}
-
-		b.bestBeaconIndex.Store(int64(i))
-
-		// Received successful response. Set this index as last successful beacon node
-		return validators, nil
-	}
-
-	return AllValidatorsResponse{}, ErrNodesUnavailable
-}
-
-func (b *MultiBeaconClient) Endpoint() string {
-	return b.clientsByLastResponse()[0].Endpoint()
-}
-
-// beaconInstancesByLastResponse returns a list of beacon clients that has the client
-// with the last successful response as the first element of the slice
-func (b *MultiBeaconClient) clientsByLastResponse() []BeaconClient {
-	index := b.bestBeaconIndex.Load()
-	if index == 0 {
-		return b.Clients
-	}
-
-	instances := make([]BeaconClient, len(b.Clients))
-	copy(instances, b.Clients)
-	instances[0], instances[index] = instances[index], instances[0]
-
-	return instances
-}
-
-type beaconClient struct {
+type BeaconClient struct {
 	beaconEndpoint *url.URL
 	log            log.Logger
-	//Config
 }
 
-func NewBeaconClient(endpoint string, l log.Logger /*, config Config*/) (*beaconClient, error) {
+func NewBeaconClient(endpoint string, l log.Logger) (*BeaconClient, error) {
 	u, err := url.Parse(endpoint)
 
-	bc := &beaconClient{
+	bc := &BeaconClient{
 		beaconEndpoint: u,
 		log:            l.WithField("beaconEndpoint", endpoint),
-		//	Config:         config,
 	}
 
 	return bc, err
 }
 
-func (b *beaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan HeadEvent) {
+/*
+func (b *BeaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan HeadEvent) {
 	logger := b.log.WithField("method", "SubscribeToHeadEvents")
 
 	eventsURL := fmt.Sprintf("%s/eth/v1/events?topics=head", b.beaconEndpoint.String())
@@ -216,10 +75,43 @@ func (b *beaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan Hea
 			logger.WithError(err).Debug("beacon subscription failed, restarting...")
 		}
 	}()
+}*/
+
+func (b *BeaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan structs.HeadEvent) {
+	logger := b.log.WithField("method", "SubscribeToHeadEvents")
+
+	eventsURL := fmt.Sprintf("%s/eth/v1/events?topics=head", b.beaconEndpoint.String())
+
+	defer logger.Debug("head events subscription stopped")
+
+	for {
+		client := sse.NewClient(eventsURL)
+		err := client.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
+			var head structs.HeadEvent
+			if err := json.Unmarshal(msg.Data, &head); err != nil {
+				logger.WithError(err).Debug("event subscription failed")
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case slotC <- head:
+				logger.
+					With(head).
+					Debug("read head subscription")
+			}
+		})
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+
+		logger.WithError(err).Debug("beacon subscription failed, restarting...")
+	}
 }
 
 // Returns proposer duties for every slot in this epoch
-func (b *beaconClient) GetProposerDuties(epoch structs.Epoch) (*RegisteredProposersResponse, error) {
+func (b *BeaconClient) GetProposerDuties(epoch structs.Epoch) (*structs.RegisteredProposersResponse, error) {
 	u := *b.beaconEndpoint
 	// https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDuties
 	u.Path = fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", epoch)
@@ -229,7 +121,7 @@ func (b *beaconClient) GetProposerDuties(epoch structs.Epoch) (*RegisteredPropos
 }
 
 // SyncStatus returns the current node sync-status
-func (b *beaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
+func (b *BeaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
 	u := *b.beaconEndpoint
 	// https://ethereum.github.io/beacon-APIs/#/ValidatorRequiredApi/getSyncingStatus
 	u.Path = "/eth/v1/node/syncing"
@@ -241,7 +133,7 @@ func (b *beaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
 	return &resp.Data, nil
 }
 
-func (b *beaconClient) KnownValidators(headSlot structs.Slot) (AllValidatorsResponse, error) {
+func (b *BeaconClient) KnownValidators(headSlot structs.Slot) (AllValidatorsResponse, error) {
 	u := *b.beaconEndpoint
 	u.Path = fmt.Sprintf("/eth/v1/beacon/states/%d/validators", headSlot)
 	q := u.Query()
@@ -254,11 +146,11 @@ func (b *beaconClient) KnownValidators(headSlot structs.Slot) (AllValidatorsResp
 	return vd, err
 }
 
-func (b *beaconClient) Endpoint() string {
+func (b *BeaconClient) Endpoint() string {
 	return b.beaconEndpoint.String()
 }
 
-func (b *beaconClient) queryBeacon(u *url.URL, method string, dst any) error {
+func (b *BeaconClient) queryBeacon(u *url.URL, method string, dst any) error {
 	logger := b.log.
 		WithField("method", "QueryBeacon").
 		WithField("URL", u.RequestURI())
@@ -303,55 +195,4 @@ func (b *beaconClient) queryBeacon(u *url.URL, method string, dst any) error {
 		Debug("beacon queried")
 
 	return nil
-}
-
-// SyncStatusPayload is the response payload for /eth/v1/node/syncing
-type SyncStatusPayload struct {
-	Data SyncStatusPayloadData
-}
-
-type SyncStatusPayloadData struct {
-	HeadSlot  uint64 `json:"head_slot,string"`
-	IsSyncing bool   `json:"is_syncing"`
-}
-
-// HeadEvent is emitted when subscribing to head events
-type HeadEvent struct {
-	Slot  uint64 `json:"slot,string"`
-	Block string `json:"block"`
-	State string `json:"state"`
-}
-
-func (h HeadEvent) Loggable() map[string]any {
-	return map[string]any{
-		"slot":  h.Slot,
-		"block": h.Block,
-		"state": h.State,
-	}
-}
-
-// RegisteredProposersResponse is the response for querying proposer duties
-type RegisteredProposersResponse struct {
-	Data []RegisteredProposersResponseData
-}
-
-type RegisteredProposersResponseData struct {
-	PubKey structs.PubKey `json:"pubkey"`
-	Slot   uint64         `json:"slot,string"`
-}
-
-// AllValidatorsResponse is the response for querying active validators
-type AllValidatorsResponse struct {
-	Data []ValidatorResponseEntry
-}
-
-type ValidatorResponseEntry struct {
-	Index     uint64                         `json:"index,string"` // Index of validator in validator registry.
-	Balance   string                         `json:"balance"`      // Current validator balance in gwei.
-	Status    string                         `json:"status"`
-	Validator ValidatorResponseValidatorData `json:"validator"`
-}
-
-type ValidatorResponseValidatorData struct {
-	Pubkey string `json:"pubkey"`
 }
