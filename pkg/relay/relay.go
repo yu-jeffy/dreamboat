@@ -10,8 +10,6 @@ import (
 
 	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
 	"github.com/blocknative/dreamboat/pkg/structs"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	ds "github.com/ipfs/go-datastore"
@@ -36,20 +34,10 @@ const (
 	DurationPerEpoch = DurationPerSlot * time.Duration(structs.SlotsPerEpoch)
 )
 
-/*
-type State interface {
-	Datastore() Datastore
-	Beacon() BeaconState
-}
-*/
-
 type RelayDatastore interface {
 	PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
-	//GetHeaders(context.Context, Query) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlot(context.Context, structs.Slot) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlots(context.Context, []structs.Slot) ([]structs.HeaderAndTrace, error)
-	// GetHeaderBatch(context.Context, []Query) ([]structs.HeaderAndTrace, error)
-
 	PutDelivered(context.Context, structs.Slot, structs.DeliveredTrace, time.Duration) error
 	GetDeliveredBySlot(context.Context, structs.Slot) (structs.BidTraceWithTimestamp, error)
 	GetDeliveredBySlots(context.Context, []structs.Slot) ([]structs.BidTraceWithTimestamp, error)
@@ -73,29 +61,21 @@ type Relay struct {
 	TTL   time.Duration
 	store RelayDatastore
 
-	bstate BeaconState
-	//builderSigningDomain  types.Domain
-	//proposerSigningDomain types.Domain
+	bstate                BeaconState
+	builderSigningDomain  types.Domain
+	proposerSigningDomain types.Domain
 }
 
 // NewRelay relay service
-func NewRelay(config config.Config, l log.Logger, store RelayDatastore) (*Relay, error) {
-	domainBuilder, err := ComputeDomain(types.DomainTypeAppBuilder, config.genesisForkVersion, types.Root{}.String())
-	if err != nil {
-		return nil, err
-	}
-
-	domainBeaconProposer, err := ComputeDomain(types.DomainTypeBeaconProposer, config.bellatrixForkVersion, config.genesisValidatorsRoot)
-	if err != nil {
-		return nil, err
-	}
-
+func NewRelay(config config.Config, l log.Logger, store RelayDatastore, bstate BeaconState, domainBuilder, domainBeaconProposer types.Domain) (*Relay, error) {
 	return &Relay{
-		l:      l,
-		config: config,
+		l: l,
+		//config: config,
 		store:  store,
-		//builderSigningDomain:  domainBuilder,
-		//proposerSigningDomain: domainBeaconProposer,
+		bstate: bstate,
+
+		builderSigningDomain:  domainBuilder,
+		proposerSigningDomain: domainBeaconProposer,
 	}, nil
 }
 
@@ -119,7 +99,7 @@ func (rs *Relay) RegisterValidator(ctx context.Context, payload []types.SignedVa
 			end = len(payload)
 		}
 		g.Go(func() error {
-			return rs.processValidator(ctx, payload[start:end], state)
+			return rs.processValidator(ctx, payload[start:end])
 		})
 	}
 
@@ -559,15 +539,6 @@ func simulateBlock() bool {
 	return true
 }
 
-/*
-func SubmissionToKey(submission *types.BuilderSubmitBlockRequest) structs.PayloadKey {
-	return PayloadKey{
-		BlockHash: submission.ExecutionPayload.BlockHash,
-		Proposer:  submission.Message.ProposerPubkey,
-		Slot:      structs.Slot(submission.Message.Slot),
-	}
-}*/
-
 func SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid *types.SignedBuilderBid, submitBlockRequest *types.BuilderSubmitBlockRequest) structs.BlockBidAndTrace {
 	getHeaderResponse := types.GetHeaderResponse{
 		Version: "bellatrix",
@@ -589,19 +560,6 @@ func SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid *types.SignedBuilderB
 		Bid:     &getHeaderResponse,
 		Payload: &getPayloadResponse,
 	}
-}
-
-// ComputeDomain computes the signing domain
-func ComputeDomain(domainType types.DomainType, forkVersionHex string, genesisValidatorsRootHex string) (domain types.Domain, err error) {
-	genesisValidatorsRoot := types.Root(common.HexToHash(genesisValidatorsRootHex))
-	forkVersionBytes, err := hexutil.Decode(forkVersionHex)
-	if err != nil || len(forkVersionBytes) > 4 {
-		err = errors.New("invalid fork version passed")
-		return domain, err
-	}
-	var forkVersion [4]byte
-	copy(forkVersion[:], forkVersionBytes[:4])
-	return types.ComputeDomain(domainType, forkVersion, genesisValidatorsRoot), nil
 }
 
 func (rs *Relay) GetPayloadDelivered(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceExtended, error) {
@@ -722,7 +680,7 @@ func (rs *Relay) getTailBlockReceived(ctx context.Context, headslot structs.Slot
 	for highSlot := headslot; len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
 		slots = slots[:0]
 		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
-			slots = append(slots, s) // TODO(l): asd
+			slots = append(slots, s) // TODO(l): check validity
 		}
 
 		nextBatch, err := rs.store.GetHeadersBySlots(ctx, slots)

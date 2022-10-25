@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	mock_relay "github.com/blocknative/dreamboat/internal/mock/pkg"
-	relay "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/golang/mock/gomock"
 	"github.com/lthibault/log"

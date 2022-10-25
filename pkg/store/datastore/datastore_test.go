@@ -356,7 +356,7 @@ func BenchmarkPutRegistration(b *testing.B) {
 	var datadir = "/tmp/" + b.Name() + uuid.New().String()
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := relay.DefaultDatastore{TTLStorage: &relay.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := Datastore{s: store}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -667,8 +667,6 @@ func random256Bytes() (b [256]byte) {
 	rand.Read(b[:])
 	return b
 }
-
-var _ relay.TTLStorage = (*mockDatastore)(nil)
 
 type mockDatastore struct{ datastore.Datastore }
 

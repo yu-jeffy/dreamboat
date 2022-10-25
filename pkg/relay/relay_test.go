@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	mock_relay "github.com/blocknative/dreamboat/internal/mock/pkg"
-	relay "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
@@ -19,9 +21,22 @@ type BeaconClient interface {
 	Endpoint() string
 }
 
+type BeaconState interface {
+	SetKnownValidator(pubkey types.PubkeyHex, index uint64)
+	KnownValidatorByIndex(index uint64) types.PubkeyHex
+	IsKnownValidator(pk types.PubkeyHex) bool
+	SetHeadSlot(sl structs.Slot)
+	HeadSlot() structs.Slot
+
+	SetUpdateTime(unixTime int64)
+	UpdateTime() time.Time
+}
+
 type BeaconManager struct {
 	l      log.Logger
 	client BeaconClient
+
+	memoryStore BeaconState
 }
 
 func NewBeaconManager(l log.Logger, client BeaconClient) *BeaconManager {
@@ -37,7 +52,7 @@ func (bm *BeaconManager) BeaconEventLoop(ctx context.Context) error {
 		return ErrBeaconNodeSyncing
 	}
 
-	err = bm.updateProposerDuties(ctx, bm.client, structs.Slot(syncStatus.HeadSlot))
+	err = bm.updateProposerDuties(ctx, structs.Slot(syncStatus.HeadSlot))
 	if err != nil {
 		return err
 	}
@@ -79,46 +94,46 @@ func (bm *BeaconManager) processNewSlot(ctx context.Context, event structs.HeadE
 		}
 	}
 
-	bm.headslotSlot = received
+	//bm.headslotSlot = received
 
 	logger.With(log.F{
-		"epoch":              s.headslotSlot.Epoch(),
-		"slotHead":           s.headslotSlot,
-		"slotStartNextEpoch": structs.Slot(s.headslotSlot.Epoch()+1) * structs.SlotsPerEpoch,
+		"epoch":              received.Epoch(),
+		"slotHead":           received,
+		"slotStartNextEpoch": structs.Slot(received.Epoch()+1) * structs.SlotsPerEpoch,
 	},
 	).Debugf("updated headSlot to %d", received)
 
 	// update proposer duties and known validators in the background
-	if (DurationPerEpoch / 2) < time.Since(s.knownValidatorsUpdateTime()) { // only update every half DurationPerEpoch
+	if (DurationPerEpoch / 2) < time.Since(bm.memoryStore.UpdateTime()) { // only update every half DurationPerEpoch
 		go func() {
-			if err := bm.updateKnownValidators(ctx, s.headslotSlot); err != nil {
-				s.l.WithError(err).Warn("failed to update known validators")
+			if err := bm.updateKnownValidators(ctx, received); err != nil {
+				bm.l.WithError(err).Warn("failed to update known validators")
 			} else {
-				s.updateTime.Store(time.Now())
+				bm.memoryStore.SetUpdateTime(time.Now().Unix())
 				s.setReady()
 			}
 		}()
 	}
 
-	if err := s.updateProposerDuties(ctx, client, s.headslotSlot); err != nil {
+	if err := bm.updateProposerDuties(ctx, received); err != nil {
 		return err
 	}
 
 	logger.With(log.F{
-		"epoch":              s.headslotSlot.Epoch(),
-		"slotHead":           s.headslotSlot,
-		"slotStartNextEpoch": structs.Slot(s.headslotSlot.Epoch()+1) * structs.SlotsPerEpoch,
-		"slot":               uint64(s.headslotSlot),
+		"epoch":              received.Epoch(),
+		"slotHead":           received,
+		"slotStartNextEpoch": structs.Slot(received.Epoch()+1) * structs.SlotsPerEpoch,
+		"slot":               uint64(received),
 		"processingTimeMs":   time.Since(timeStart).Milliseconds(),
 	}).Info("updated head slot")
 
 	return nil
 }
 
-func (bm *BeaconManager) updateProposerDuties(ctx context.Context, client BeaconClient, headSlot structs.Slot) error {
+func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot structs.Slot) error {
 	epoch := headSlot.Epoch()
 
-	logger := s.Log.With(log.F{
+	logger := bm.l.With(log.F{
 		"method":    "UpdateProposerDuties",
 		"slot":      headSlot,
 		"epochFrom": epoch,
@@ -130,7 +145,7 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, client Beacon
 	state := dutiesState{}
 
 	// Query current epoch
-	current, err := client.GetProposerDuties(epoch)
+	current, err := bm.client.GetProposerDuties(epoch)
 	if err != nil {
 		return fmt.Errorf("current epoch: get proposer duties: %w", err)
 	}
@@ -138,7 +153,7 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, client Beacon
 	entries := current.Data
 
 	// Query next epoch
-	next, err := client.GetProposerDuties(epoch + 1)
+	next, err := bm.client.GetProposerDuties(epoch + 1)
 	if err != nil {
 		return fmt.Errorf("next epoch: get proposer duties: %w", err)
 	}
@@ -148,7 +163,7 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, client Beacon
 	state.currentSlot = headSlot
 
 	for _, e := range entries {
-		reg, err := s.store.GetRegistration(ctx, e.PubKey)
+		reg, err := bm.store.GetRegistration(ctx, e.PubKey)
 		if err == nil {
 			logger.With(e.PubKey).
 				Debug("new proposer duty")
@@ -172,28 +187,32 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, client Beacon
 	return nil
 }
 
-func (bm *BeaconManager) updateKnownValidators(ctx context.Context, client BeaconClient, current structs.Slot) error {
+func (bm *BeaconManager) updateKnownValidators(ctx context.Context, current structs.Slot) error {
 	logger := bm.l.WithField("method", "UpdateKnownValidators")
 	timeStart := time.Now()
 
-	state := validatorsState{}
-	validators, err := client.KnownValidators(current)
+	//state := validatorsState{}
+	validators, err := bm.client.KnownValidators(current)
 	if err != nil {
 		return err
 	}
 
-	knownValidators := make(map[types.PubkeyHex]struct{})
-	knownValidatorsByIndex := make(map[uint64]types.PubkeyHex)
 	for _, vs := range validators.Data {
-		knownValidators[types.NewPubkeyHex(vs.Validator.Pubkey)] = struct{}{}
-		knownValidatorsByIndex[vs.Index] = types.NewPubkeyHex(vs.Validator.Pubkey)
+		bm.memoryStore.SetKnownValidator(types.NewPubkeyHex(vs.Validator.Pubkey), vs.Index)
 	}
+	/*
+		knownValidators := make(map[types.PubkeyHex]struct{})
+		knownValidatorsByIndex := make(map[uint64]types.PubkeyHex)
+		for _, vs := range validators.Data {
+			knownValidators[types.NewPubkeyHex(vs.Validator.Pubkey)] = struct{}{}
+			knownValidatorsByIndex[vs.Index] = types.NewPubkeyHex(vs.Validator.Pubkey)
+		}
 
-	state.knownValidators = knownValidators
-	state.knownValidatorsByIndex = knownValidatorsByIndex
+		state.knownValidators = knownValidators
+		state.knownValidatorsByIndex = knownValidatorsByIndex
 
-	s.state.validators.Store(state)
-
+		s.state.validators.Store(state)
+	*/
 	logger.With(log.F{
 		"slotHead":         uint64(current),
 		"numValidators":    len(knownValidators),
@@ -203,12 +222,67 @@ func (bm *BeaconManager) updateKnownValidators(ctx context.Context, client Beaco
 	return nil
 }
 
-func (bm *BeaconManager) knownValidatorsUpdateTime() time.Time {
-	updateTime, ok := s.updateTime.Load().(time.Time)
-	if !ok {
-		return time.Time{}
-	}
-	return updateTime
+type BeaconMemstore struct {
+	headSlot uint64
+
+	updateTimeUnix int64
+
+	proposerDutiesResponse []types.BuilderGetValidatorsResponseEntry
+
+	knownValidatorsByIndex map[uint64]types.PubkeyHex
+	knownValidators        map[types.PubkeyHex]struct{}
+	kvMutex                sync.RWMutex
+}
+
+func NewBeaconMemstore() *BeaconMemstore {
+	return &BeaconMemstore{}
+}
+
+func (bms *BeaconMemstore) SetKnownValidator(pubkey types.PubkeyHex, index uint64) {
+	bms.kvMutex.Lock()
+	defer bms.kvMutex.Unlock()
+	bms.knownValidatorsByIndex[index] = pubkey
+	bms.knownValidators[pubkey] = struct{}{}
+}
+
+func (bms *BeaconMemstore) ResetKnownValidators(pubkey types.PubkeyHex, index uint64) {
+	bms.kvMutex.Lock()
+	defer bms.kvMutex.Unlock()
+	bms.knownValidatorsByIndex[index] = pubkey
+	bms.knownValidators[pubkey] = struct{}{}
+}
+
+func (bms *BeaconMemstore) KnownValidatorByIndex(index uint64) types.PubkeyHex {
+	bms.kvMutex.RLock()
+	defer bms.kvMutex.RUnlock()
+	return bms.knownValidatorsByIndex[index]
+}
+
+func (bms *BeaconMemstore) IsKnownValidator(pk types.PubkeyHex) bool {
+	bms.kvMutex.RLock()
+	defer bms.kvMutex.RUnlock()
+	_, ok := bms.knownValidators[pk]
+	return ok
+}
+
+func (bms *BeaconMemstore) SetHeadSlot(sl structs.Slot) {
+	atomic.StoreUint64(&bms.headSlot, uint64(sl))
+}
+
+func (bms *BeaconMemstore) SetUpdateTime(unixTime int64) {
+	atomic.StoreInt64(&bms.updateTimeUnix, unixTime)
+}
+
+func (bms *BeaconMemstore) UpdateTime() time.Time {
+	return time.Unix(bms.updateTimeUnix, 0)
+}
+
+func (bms *BeaconMemstore) HeadSlot() structs.Slot {
+	return structs.Slot(bms.headSlot)
+}
+
+func (bms *BeaconMemstore) ValidatorsMap() []types.BuilderGetValidatorsResponseEntry {
+	//return
 }
 
 /*

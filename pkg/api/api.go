@@ -55,7 +55,7 @@ type Relay interface {
 
 	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
 	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
-	GetValidators() []types.BuilderGetValidatorsResponseEntry
+	GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry
 
 	// Data APIs
 	GetPayloadDelivered(context.Context, structs.TraceQuery) ([]structs.BidTraceExtended, error)
@@ -203,7 +203,7 @@ func (a *API) submitBlock(w http.ResponseWriter, r *http.Request) (int, error) {
 }
 
 func (a *API) getValidators(w http.ResponseWriter, r *http.Request) (int, error) {
-	vs := a.relay.GetValidators()
+	vs := a.relay.GetValidators(r.Context())
 	if vs == nil {
 		a.l.Trace("no registered validators for epoch")
 	}

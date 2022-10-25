@@ -3,18 +3,17 @@ package beacon
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/lthibault/log"
-	"go.uber.org/atomic"
 )
 
 type MultiBeaconClient struct {
 	Log     log.Logger
 	Clients []BeaconClient
 
-	//bestBeaconIndex uberatomic.Int64
-	bestBeaconIndex atomic.Int64
+	bestBeaconIndex int64
 }
 
 func NewMultiBeaconClient(l log.Logger, clients []BeaconClient) BeaconClient {
@@ -40,7 +39,7 @@ func (b *MultiBeaconClient) GetProposerDuties(epoch structs.Epoch) (*structs.Reg
 			continue
 		}
 
-		b.bestBeaconIndex.Store(int64(i))
+		atomic.StoreInt64(&b.bestBeaconIndex, int64(i))
 
 		// Received successful response. Set this index as last successful beacon node
 		return duties, nil
@@ -113,7 +112,7 @@ func (b *MultiBeaconClient) KnownValidators(headSlot structs.Slot) (a structs.Al
 			continue
 		}
 
-		b.bestBeaconIndex.Store(int64(i))
+		atomic.StoreInt64(&b.bestBeaconIndex, int64(i))
 
 		// Received successful response. Set this index as last successful beacon node
 		return validators, nil
@@ -129,14 +128,13 @@ func (b *MultiBeaconClient) Endpoint() string {
 // beaconInstancesByLastResponse returns a list of beacon clients that has the client
 // with the last successful response as the first element of the slice
 func (b *MultiBeaconClient) clientsByLastResponse() []BeaconClient {
-	index := b.bestBeaconIndex.Load()
-	if index == 0 {
+	if b.bestBeaconIndex == 0 {
 		return b.Clients
 	}
 
 	instances := make([]BeaconClient, len(b.Clients))
 	copy(instances, b.Clients)
-	instances[0], instances[index] = instances[index], instances[0]
+	instances[0], instances[b.bestBeaconIndex] = instances[b.bestBeaconIndex], instances[0]
 
 	return instances
 }
