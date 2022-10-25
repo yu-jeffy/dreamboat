@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
 	"os"
 
 	"time"
+
+	"github.com/lthibault/log"
 
 	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
 	"github.com/blocknative/dreamboat/pkg/relay"
@@ -109,7 +110,6 @@ var flags = []cli.Flag{
 
 var (
 	cfg config.Config
-	svr http.Server
 )
 
 func init() {
@@ -129,7 +129,7 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		cfg.Log.Fatal(err)
+		l.Fatal(err)
 	}
 }
 
@@ -141,7 +141,6 @@ func setup() cli.BeforeFunc {
 		}
 
 		cfg = config.Config{
-			Log:                 config.Logger(c),
 			RelayRequestTimeout: c.Duration("timeout"),
 			Network:             c.String("network"),
 			BuilderCheck:        c.Bool("check-builder"),
@@ -150,17 +149,7 @@ func setup() cli.BeforeFunc {
 			PubKey:              pk,
 			SecretKey:           sk,
 			Datadir:             c.String("datadir"),
-			TTL:                 c.Duration("ttl"),
 			CheckKnownValidator: c.Bool("checkKnownValidator"),
-		}
-
-		svr = http.Server{
-			Addr:         c.String("addr"),
-			ReadTimeout:  c.Duration("timeout"),
-			WriteTimeout: c.Duration("timeout"),
-			IdleTimeout:  time.Second * 2,
-
-			MaxHeaderBytes: 4096,
 		}
 
 		return
@@ -186,14 +175,12 @@ func run() cli.ActionFunc {
 	return func(c *cli.Context) error {
 		g, ctx := errgroup.WithContext(c.Context)
 
+		l := log.New().WithField("service", "RelayService")
+
 		// setup the relay service
 		service := &service.DefaultService{
-			Log: cfg.Log,
-			TTL: cfg.TTL,
-		}
-
-		if s.Log == nil {
-			s.Log = log.New().WithField("service", "RelayService")
+			Log: l,
+			TTL: c.Duration("ttl"),
 		}
 
 		timeRelayStart := time.Now()
@@ -203,7 +190,7 @@ func run() cli.ActionFunc {
 				return
 			}
 		}
-		s.Log.WithFields(logrus.Fields{
+		l.WithFields(logrus.Fields{
 			"service":     "relay",
 			"startTimeMs": time.Since(timeRelayStart).Milliseconds(),
 		}).Info("initialized")
@@ -221,7 +208,7 @@ func run() cli.ActionFunc {
 
 			s.Datastore = &datastore.Datastore{TTLStorage: s.Storage}
 		}
-		s.Log.
+		l.
 			WithFields(logrus.Fields{
 				"service":     "datastore",
 				"startTimeMs": time.Since(timeDataStoreStart).Milliseconds(),
@@ -247,11 +234,11 @@ func run() cli.ActionFunc {
 
 			client, err := s.NewBeaconClient()
 			if err != nil {
-				s.Log.WithError(err).Warn("failed beacon client registration")
+				l.WithError(err).Warn("failed beacon client registration")
 				return err
 			}
 
-			s.Log.Info("beacon client initialized")
+			l.Info("beacon client initialized")
 
 			return s.beaconEventLoop(ctx, client)
 
@@ -265,7 +252,15 @@ func run() cli.ActionFunc {
 			return g.Wait()
 		}
 
-		cfg.Log.Debug("relay service ready")
+		l.Debug("relay service ready")
+
+		svr := http.Server{
+			Addr:           c.String("addr"),
+			ReadTimeout:    c.Duration("timeout"),
+			WriteTimeout:   c.Duration("timeout"),
+			IdleTimeout:    time.Second * 2,
+			MaxHeaderBytes: 4096,
+		}
 
 		// run the http server
 		g.Go(func() (err error) {
@@ -275,11 +270,11 @@ func run() cli.ActionFunc {
 
 			svr.Handler = &api.API{
 				Service:       service,
-				Log:           cfg.Log,
+				Log:           l,
 				EnableProfile: c.Bool("profile"),
 			}
 
-			cfg.Log.Info("http server listening")
+			l.Info("http server listening")
 			if err = svr.ListenAndServe(); err == http.ErrServerClosed {
 				err = nil
 			}
@@ -287,16 +282,17 @@ func run() cli.ActionFunc {
 			return err
 		})
 
-		g.Go(func() error {
-			defer svr.Close()
-			<-ctx.Done()
+		//g.Go(func() error {
 
-			ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			defer cancel()
+		defer svr.Close()
+		<-ctx.Done()
 
-			return svr.Shutdown(ctx)
-		})
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
 
-		return g.Wait()
+		svr.Shutdown(ctx)
+		//})
+
+		//return g.Wait()
 	}
 }

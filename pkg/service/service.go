@@ -44,13 +44,13 @@ func (b BuilderGetValidatorsResponseEntrySlice) Loggable() map[string]any {
 
 type Relay interface {
 	// Proposer APIs
-	RegisterValidator(context.Context, []types.SignedValidatorRegistration, State) error
-	GetHeader(context.Context, structs.HeaderRequest, State) (*types.GetHeaderResponse, error)
-	GetPayload(context.Context, *types.SignedBlindedBeaconBlock, State) (*types.GetPayloadResponse, error)
+	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
+	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
+	GetPayload(context.Context, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
 
 	// Builder APIs
-	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest, State) error
-	GetValidators(State) []types.BuilderGetValidatorsResponseEntry
+	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
+	GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry
 }
 
 type BeaconClient interface {
@@ -65,8 +65,7 @@ type DefaultService struct {
 	Log log.Logger
 	TTL time.Duration
 
-	Relay           Relay
-	Storage         TTLStorage
+	Relay           Relay //
 	Datastore       Datastore
 	NewBeaconClient func() (BeaconClient, error)
 
@@ -370,13 +369,13 @@ func (s *DefaultService) GetPayloadDelivered(ctx context.Context, query structs.
 	)
 
 	if query.HasSlot() {
-		event, err = s.state.Datastore().GetDelivered(ctx, Query{Slot: query.Slot})
+		event, err = s.Datastore.GetDelivered(ctx, Query{Slot: query.Slot})
 	} else if query.HasBlockHash() {
-		event, err = s.state.Datastore().GetDelivered(ctx, Query{BlockHash: query.BlockHash})
+		event, err = s.Datastore.GetDelivered(ctx, Query{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
-		event, err = s.state.Datastore().GetDelivered(ctx, Query{BlockNum: query.BlockNum})
+		event, err = s.Datastore.GetDelivered(ctx, Query{BlockNum: query.BlockNum})
 	} else if query.HasPubkey() {
-		event, err = s.state.Datastore().GetDelivered(ctx, Query{PubKey: query.Pubkey})
+		event, err = s.Datastore.GetDelivered(ctx, Query{PubKey: query.Pubkey})
 	} else {
 		return s.getTailDelivered(ctx, query.Limit, query.Cursor)
 	}
@@ -441,11 +440,11 @@ func (s *DefaultService) GetBlockReceived(ctx context.Context, query structs.Tra
 	)
 
 	if query.HasSlot() {
-		events, err = s.state.Datastore().GetHeaders(ctx, Query{Slot: query.Slot})
+		events, err = s.Datastore.GetHeaders(ctx, Query{Slot: query.Slot})
 	} else if query.HasBlockHash() {
-		events, err = s.state.Datastore().GetHeaders(ctx, Query{BlockHash: query.BlockHash})
+		events, err = s.Datastore.GetHeaders(ctx, Query{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
-		events, err = s.state.Datastore().GetHeaders(ctx, Query{BlockNum: query.BlockNum})
+		events, err = s.Datastore.GetHeaders(ctx, Query{BlockNum: query.BlockNum})
 	} else {
 		return s.getTailBlockReceived(ctx, query.Limit)
 	}
@@ -478,7 +477,7 @@ func (s *DefaultService) getTailBlockReceived(ctx context.Context, limit uint64)
 			queries = append(queries, Query{Slot: s})
 		}
 
-		nextBatch, err := s.state.Datastore().GetHeaderBatch(ctx, queries)
+		nextBatch, err := s.Datastore.GetHeaderBatch(ctx, queries)
 		if err != nil {
 			s.Log.WithError(err).Warn("failed getting header batch")
 		} else {
@@ -498,12 +497,9 @@ func (s *DefaultService) Registration(ctx context.Context, pk types.PublicKey) (
 }
 
 type atomicState struct {
-	datastore  atomic.Value
 	duties     atomic.Value
 	validators atomic.Value
 }
-
-func (as *atomicState) Datastore() Datastore { return as.datastore.Load().(Datastore) }
 
 func (as *atomicState) Beacon() BeaconState {
 	duties := as.duties.Load().(dutiesState)

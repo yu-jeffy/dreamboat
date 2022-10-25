@@ -37,7 +37,6 @@ const (
 
 // Config provides all available options for the default BeaconClient and Relay
 type Config struct {
-	Log                 log.Logger
 	BuilderURLs         []string
 	Network             string
 	RelayRequestTimeout time.Duration
@@ -46,7 +45,7 @@ type Config struct {
 	PubKey              types.PublicKey
 	SecretKey           *bls.SecretKey
 	Datadir             string
-	TTL                 time.Duration
+	//TTL                 time.Duration
 	CheckKnownValidator bool
 
 	// private fields; populated during validation
@@ -57,7 +56,7 @@ type Config struct {
 }
 
 func NewConfig() Config {
-	return Config{Log: log.New()}
+	return Config{}
 }
 
 func (c *Config) validate() error {

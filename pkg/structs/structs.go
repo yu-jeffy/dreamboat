@@ -136,3 +136,17 @@ type BlockBidAndTrace struct {
 	Bid     *types.GetHeaderResponse
 	Payload *types.GetPayloadResponse
 }
+
+type DeliveredTrace struct {
+	Trace       BidTraceWithTimestamp
+	BlockNumber uint64
+}
+type PayloadKey struct {
+	BlockHash types.Hash
+	Proposer  types.PublicKey
+	Slot      Slot
+}
+
+func PayloadKeyKey(key PayloadKey) ds.Key {
+	return ds.NewKey(fmt.Sprintf("payload-%s-%s-%d", key.BlockHash.String(), key.Proposer.String(), key.Slot))
+}

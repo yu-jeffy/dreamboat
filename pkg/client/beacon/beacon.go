@@ -168,16 +168,16 @@ func (b *MultiBeaconClient) clientsByLastResponse() []BeaconClient {
 type beaconClient struct {
 	beaconEndpoint *url.URL
 	log            log.Logger
-	Config
+	//Config
 }
 
-func NewBeaconClient(endpoint string, config Config) (*beaconClient, error) {
+func NewBeaconClient(endpoint string, l log.Logger /*, config Config*/) (*beaconClient, error) {
 	u, err := url.Parse(endpoint)
 
 	bc := &beaconClient{
 		beaconEndpoint: u,
-		log:            config.Log.WithField("beaconEndpoint", endpoint),
-		Config:         config,
+		log:            l.WithField("beaconEndpoint", endpoint),
+		//	Config:         config,
 	}
 
 	return bc, err
@@ -336,8 +336,8 @@ type RegisteredProposersResponse struct {
 }
 
 type RegisteredProposersResponseData struct {
-	PubKey PubKey `json:"pubkey"`
-	Slot   uint64 `json:"slot,string"`
+	PubKey structs.PubKey `json:"pubkey"`
+	Slot   uint64         `json:"slot,string"`
 }
 
 // AllValidatorsResponse is the response for querying active validators
