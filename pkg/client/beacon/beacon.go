@@ -1,4 +1,3 @@
-//go:generate mockgen -source=beacon.go -destination=../internal/mock/pkg/beacon.go -package=mock_relay
 package beacon
 
 import (
@@ -115,17 +114,17 @@ func (b *BeaconClient) GetProposerDuties(epoch structs.Epoch) (*structs.Register
 	u := *b.beaconEndpoint
 	// https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDuties
 	u.Path = fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", epoch)
-	resp := new(RegisteredProposersResponse)
+	resp := &structs.RegisteredProposersResponse{}
 	err := b.queryBeacon(&u, "GET", resp)
 	return resp, err
 }
 
 // SyncStatus returns the current node sync-status
-func (b *BeaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
+func (b *BeaconClient) SyncStatus() (*structs.SyncStatusPayloadData, error) {
 	u := *b.beaconEndpoint
 	// https://ethereum.github.io/beacon-APIs/#/ValidatorRequiredApi/getSyncingStatus
 	u.Path = "/eth/v1/node/syncing"
-	resp := new(SyncStatusPayload)
+	resp := &structs.SyncStatusPayload{}
 	err := b.queryBeacon(&u, "GET", resp)
 	if err != nil {
 		return nil, err
@@ -133,16 +132,15 @@ func (b *BeaconClient) SyncStatus() (*SyncStatusPayloadData, error) {
 	return &resp.Data, nil
 }
 
-func (b *BeaconClient) KnownValidators(headSlot structs.Slot) (AllValidatorsResponse, error) {
+func (b *BeaconClient) KnownValidators(headSlot structs.Slot) (structs.AllValidatorsResponse, error) {
 	u := *b.beaconEndpoint
 	u.Path = fmt.Sprintf("/eth/v1/beacon/states/%d/validators", headSlot)
 	q := u.Query()
 	q.Add("status", "active,pending")
 	u.RawQuery = q.Encode()
 
-	var vd AllValidatorsResponse
+	var vd structs.AllValidatorsResponse
 	err := b.queryBeacon(&u, "GET", &vd)
-
 	return vd, err
 }
 

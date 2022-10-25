@@ -210,6 +210,9 @@ func run() cli.ActionFunc {
 		go bm.BeaconEventLoop(ctx)
 
 		// RELAY INITIALIZATION
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
 
 		r, err := relay.NewRelay(cfg, l, store)
 		r.TTL = c.Duration("ttl")

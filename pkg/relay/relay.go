@@ -16,6 +16,7 @@ import (
 	"github.com/flashbots/go-boost-utils/types"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/lthibault/log"
+	"golang.org/x/exp/constraints"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -43,7 +44,7 @@ type State interface {
 */
 
 type RelayDatastore interface {
-	// PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
+	PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
 	//GetHeaders(context.Context, Query) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlot(context.Context, structs.Slot) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlots(context.Context, []structs.Slot) ([]structs.HeaderAndTrace, error)
@@ -69,18 +70,16 @@ type Relay struct {
 	//config                Config
 	l log.Logger
 
-	TTL                   time.Duration
-	store                 RelayDatastore
-	builderSigningDomain  types.Domain
-	proposerSigningDomain types.Domain
+	TTL   time.Duration
+	store RelayDatastore
+
+	bstate BeaconState
+	//builderSigningDomain  types.Domain
+	//proposerSigningDomain types.Domain
 }
 
 // NewRelay relay service
 func NewRelay(config config.Config, l log.Logger, store RelayDatastore) (*Relay, error) {
-	if err := config.validate(); err != nil {
-		return nil, err
-	}
-
 	domainBuilder, err := ComputeDomain(types.DomainTypeAppBuilder, config.genesisForkVersion, types.Root{}.String())
 	if err != nil {
 		return nil, err
@@ -92,11 +91,11 @@ func NewRelay(config config.Config, l log.Logger, store RelayDatastore) (*Relay,
 	}
 
 	return &Relay{
-		l:                     l,
-		config:                config,
-		store:                 store,
-		builderSigningDomain:  domainBuilder,
-		proposerSigningDomain: domainBeaconProposer,
+		l:      l,
+		config: config,
+		store:  store,
+		//builderSigningDomain:  domainBuilder,
+		//proposerSigningDomain: domainBeaconProposer,
 	}, nil
 }
 
@@ -165,7 +164,7 @@ func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedVal
 
 		pk := structs.PubKey{registerRequest.Message.Pubkey}
 
-		ok, err = state.Beacon().IsKnownValidator(pk.PubkeyHex())
+		ok, err = rs.bstate.IsKnownValidator(pk.PubkeyHex())
 		if err != nil {
 			return err
 		} else if !ok {
@@ -174,7 +173,7 @@ func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedVal
 			} else {
 				logger.
 					WithField("pubkey", pk.PublicKey).
-					WithField("slot", state.Beacon().HeadSlot()).
+					WithField("slot", rs.bstate.HeadSlot()).
 					Debug("not a known validator")
 			}
 		}
@@ -207,7 +206,7 @@ func (rs *Relay) processValidator(ctx context.Context, payload []types.SignedVal
 		}
 
 		// officially register validator
-		if err := rs.store.PutRegistration(ctx, pk, registerRequest, rs.config.TTL); err != nil {
+		if err := rs.store.PutRegistration(ctx, pk, registerRequest, rs.TTL); err != nil {
 			logger.WithField("pubkey", registerRequest.Message.Pubkey).WithError(err).Debug("Error in PutRegistration")
 			return fmt.Errorf("failed to store %s", registerRequest.Message.Pubkey.String())
 		}
@@ -300,7 +299,7 @@ func (rs *Relay) GetHeader(ctx context.Context, request structs.HeaderRequest) (
 }
 
 // GetPayload is called by a block proposer communicating through mev-boost and reveals execution payload of given signed beacon block if stored
-func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBlindedBeaconBlock, state State) (*types.GetPayloadResponse, error) {
+func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error) {
 	logger := rs.l.WithField("method", "GetPayload")
 	timeStart := time.Now()
 
@@ -308,7 +307,7 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 		return nil, fmt.Errorf("invalid signature")
 	}
 
-	proposerPubkey, err := state.Beacon().KnownValidatorByIndex(payloadRequest.Message.ProposerIndex)
+	proposerPubkey, err := rs.bstate.KnownValidatorByIndex(payloadRequest.Message.ProposerIndex)
 	if err != nil && errors.Is(err, ErrUnknownValue) {
 		return nil, fmt.Errorf("unknown validator for index %d", payloadRequest.Message.ProposerIndex)
 	} else if err != nil {
@@ -390,7 +389,7 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 		BlockNumber: payload.Payload.Data.BlockNumber,
 	}
 
-	if err := rs.store.PutDelivered(ctx, structs.Slot(payloadRequest.Message.Slot), trace, rs.config.TTL); err != nil {
+	if err := rs.store.PutDelivered(ctx, structs.Slot(payloadRequest.Message.Slot), trace, rs.TTL); err != nil {
 		rs.l.WithError(err).Warn("failed to set payload after delivery")
 	}
 
@@ -439,7 +438,7 @@ func SubmitBlockRequestToSignedBuilderBid(req *types.BuilderSubmitBlockRequest, 
 }
 
 // SubmitBlock Accepts block from trusted builder and stores
-func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.BuilderSubmitBlockRequest, state State) error {
+func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.BuilderSubmitBlockRequest) error {
 	timeStart := time.Now()
 
 	logger := rs.l.With(log.F{
@@ -494,7 +493,7 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 		Proposer:  submitBlockRequest.Message.ProposerPubkey,
 		Slot:      structs.Slot(submitBlockRequest.Message.Slot),
 	})
-	if err := rs.store.PutPayload(ctx, submissionKey, &payload, rs.config.TTL); err != nil {
+	if err := rs.store.PutPayload(ctx, submissionKey, &payload, rs.TTL); err != nil {
 		return err
 	}
 
@@ -525,9 +524,7 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 		},
 	}
 
-	err = rs.Datastore.PutHeader(ctx, slot, h, rs.config.TTL)
-
-	if err != nil {
+	if err = rs.store.PutHeader(ctx, slot, h, rs.TTL); err != nil {
 		logger.WithError(err).Error("PutHeader failed")
 		return err
 	}
@@ -535,14 +532,13 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 	logger.With(log.F{
 		"processingTimeMs": time.Since(timeStart).Milliseconds(),
 	}).Trace("builder block stored")
-
 	return nil
 }
 
 // GetValidators returns a list of registered block proposers in current and next epoch
 func (rs *Relay) GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry {
 	log := rs.l.WithField("method", "GetValidators")
-	validators := state.Beacon().ValidatorsMap()
+	validators := rs.bstate.ValidatorsMap()
 	log.With(validators).Debug("validatored map sent")
 	return validators
 }
@@ -615,7 +611,7 @@ func (rs *Relay) GetPayloadDelivered(ctx context.Context, query structs.TraceQue
 	)
 
 	if query.HasSlot() {
-		event, err = rs.store.GetDelivered(ctx, Query{Slot: query.Slot})
+		event, err = rs.store.GetDeliveredBySlot(ctx, query.Slot)
 	} else if query.HasBlockHash() {
 		event, err = rs.store.GetDelivered(ctx, Query{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
@@ -623,7 +619,7 @@ func (rs *Relay) GetPayloadDelivered(ctx context.Context, query structs.TraceQue
 	} else if query.HasPubkey() {
 		event, err = rs.store.GetDelivered(ctx, Query{PubKey: query.Pubkey})
 	} else {
-		headSlot := rs.state.Beacon().HeadSlot()
+		headSlot := rs.bstate.HeadSlot()
 		return rs.getTailDelivered(ctx, headSlot, query.Limit, query.Cursor, rs.TTL)
 	}
 
@@ -677,6 +673,13 @@ func (rs *Relay) getTailDelivered(ctx context.Context, headSlot structs.Slot, li
 	return events, nil
 }
 
+func min[T constraints.Ordered](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (rs *Relay) GetBlockReceived(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error) {
 	var (
 		events []structs.HeaderAndTrace
@@ -684,14 +687,14 @@ func (rs *Relay) GetBlockReceived(ctx context.Context, query structs.TraceQuery)
 	)
 
 	if query.HasSlot() {
-		events, err = rs.store.GetHeaders(ctx, Query{Slot: query.Slot})
+		events, err = rs.store.GetHeadersBySlot(ctx, query.Slot)
 	} else if query.HasBlockHash() {
 		events, err = rs.store.GetHeaders(ctx, Query{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
 		events, err = rs.store.GetHeaders(ctx, Query{BlockNum: query.BlockNum})
 	} else {
-		hs := rs.state.Beacon().HeadSlot()
-		return rs.getTailBlockReceived(ctx, hs, query.Limit)
+		hs := rs.bstate.HeadSlot()
+		return rs.getTailBlockReceived(ctx, hs, query.Limit, rs.TTL)
 	}
 
 	if err == nil {
@@ -706,28 +709,28 @@ func (rs *Relay) GetBlockReceived(ctx context.Context, query structs.TraceQuery)
 	return nil, err
 }
 
-func (rs *Relay) getTailBlockReceived(ctx context.Context, headslot structs.Slot, limit uint64) ([]structs.BidTraceWithTimestamp, error) {
+func (rs *Relay) getTailBlockReceived(ctx context.Context, headslot structs.Slot, limit uint64, ttl time.Duration) ([]structs.BidTraceWithTimestamp, error) {
 	batch := make([]structs.HeaderAndTrace, 0, limit)
-	stop := headslot - structs.Slot(s.TTL/DurationPerSlot)
-	queries := make([]Query, 0)
+	stop := headslot - structs.Slot(ttl/DurationPerSlot)
 
-	s.Log.WithField("limit", limit).
-		WithField("start", s.state.Beacon().HeadSlot()).
+	rs.l.WithField("limit", limit).
+		WithField("start", headslot).
 		WithField("stop", stop).
 		Debug("querying received block traces")
 
-	for highSlot := s.state.Beacon().HeadSlot(); len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
-		queries = queries[:0]
+	slots := make([]structs.Slot, 0)
+	for highSlot := headslot; len(batch) < int(limit) && stop <= highSlot; highSlot -= structs.Slot(limit) {
+		slots = slots[:0]
 		for s := highSlot; highSlot-structs.Slot(limit) < s && stop <= s; s-- {
-			queries = append(queries, Query{Slot: s})
+			slots = append(slots, s) // TODO(l): asd
 		}
 
-		nextBatch, err := rs.store.GetHeaderBatch(ctx, queries)
+		nextBatch, err := rs.store.GetHeadersBySlots(ctx, slots)
 		if err != nil {
-			s.Log.WithError(err).Warn("failed getting header batch")
-		} else {
-			batch = append(batch, nextBatch[:min(int(limit)-len(batch), len(nextBatch))]...)
+			rs.l.WithError(err).Warn("failed getting header batch")
+			continue
 		}
+		batch = append(batch, nextBatch[:min(int(limit)-len(batch), len(nextBatch))]...)
 	}
 
 	events := make([]structs.BidTraceWithTimestamp, 0, len(batch))

@@ -59,7 +59,7 @@ func NewConfig() Config {
 	return Config{}
 }
 
-func (c *Config) validate() error {
+func (c *Config) Validate() error {
 	c.builders = make(map[structs.PubKey]*builder)
 
 	if err := c.validateNetwork(); err != nil {
