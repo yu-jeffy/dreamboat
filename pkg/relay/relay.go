@@ -10,7 +10,6 @@ import (
 
 	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
 	"github.com/blocknative/dreamboat/pkg/structs"
-	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/lthibault/log"
@@ -21,8 +20,6 @@ import (
 var (
 	ErrNoPayloadFound = errors.New("no payload found")
 
-	ErrMissingRequest        = errors.New("req is nil")
-	ErrMissingSecretKey      = errors.New("secret key is nil")
 	ErrUnknownValue          = errors.New("value is unknown")
 	UnregisteredValidatorMsg = "unregistered validator"
 	noBuilderBidMsg          = "no builder bid"
@@ -61,7 +58,7 @@ type Relay struct {
 	TTL   time.Duration
 	store RelayDatastore
 
-	bstate                BeaconState
+	//bstate                BeaconState
 	builderSigningDomain  types.Domain
 	proposerSigningDomain types.Domain
 }
@@ -71,8 +68,8 @@ func NewRelay(config config.Config, l log.Logger, store RelayDatastore, bstate B
 	return &Relay{
 		l: l,
 		//config: config,
-		store:  store,
-		bstate: bstate,
+		store: store,
+		//bstate: bstate,
 
 		builderSigningDomain:  domainBuilder,
 		proposerSigningDomain: domainBeaconProposer,
@@ -383,40 +380,6 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 	return &response, nil
 }
 
-// ***** Relay Domain *****
-
-// SubmitBlockRequestToSignedBuilderBid converts a builders block submission to a bid compatible with mev-boost
-func SubmitBlockRequestToSignedBuilderBid(req *types.BuilderSubmitBlockRequest, sk *bls.SecretKey, pubkey *types.PublicKey, domain types.Domain) (*types.SignedBuilderBid, error) {
-	if req == nil {
-		return nil, ErrMissingRequest
-	}
-
-	if sk == nil {
-		return nil, ErrMissingSecretKey
-	}
-
-	header, err := types.PayloadToPayloadHeader(req.ExecutionPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	builderBid := types.BuilderBid{
-		Value:  req.Message.Value,
-		Header: header,
-		Pubkey: *pubkey,
-	}
-
-	sig, err := types.SignMessage(&builderBid, domain, sk)
-	if err != nil {
-		return nil, err
-	}
-
-	return &types.SignedBuilderBid{
-		Message:   &builderBid,
-		Signature: sig,
-	}, nil
-}
-
 // SubmitBlock Accepts block from trusted builder and stores
 func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.BuilderSubmitBlockRequest) error {
 	timeStart := time.Now()
@@ -441,7 +404,7 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 		return fmt.Errorf("verify block: %w", err)
 	}
 
-	signedBuilderBid, err := SubmitBlockRequestToSignedBuilderBid(
+	signedBuilderBid, err := structs.SubmitBlockRequestToSignedBuilderBid(
 		submitBlockRequest,
 		rs.config.SecretKey,
 		&rs.config.PubKey,
@@ -466,7 +429,7 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 		return errors.New("the slot payload was already delivered")
 	}
 
-	payload := SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitBlockRequest)
+	payload := structs.SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitBlockRequest)
 
 	submissionKey := structs.PayloadKeyKey(structs.PayloadKey{
 		BlockHash: submitBlockRequest.ExecutionPayload.BlockHash,
@@ -537,29 +500,6 @@ func simulateBlock() bool {
 	// TODO : Simulate block here once support for external builders
 	// we currently only support a single internally trusted builder
 	return true
-}
-
-func SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid *types.SignedBuilderBid, submitBlockRequest *types.BuilderSubmitBlockRequest) structs.BlockBidAndTrace {
-	getHeaderResponse := types.GetHeaderResponse{
-		Version: "bellatrix",
-		Data:    signedBuilderBid,
-	}
-
-	getPayloadResponse := types.GetPayloadResponse{
-		Version: "bellatrix",
-		Data:    submitBlockRequest.ExecutionPayload,
-	}
-
-	signedBidTrace := types.SignedBidTrace{
-		Message:   submitBlockRequest.Message,
-		Signature: submitBlockRequest.Signature,
-	}
-
-	return structs.BlockBidAndTrace{
-		Trace:   &signedBidTrace,
-		Bid:     &getHeaderResponse,
-		Payload: &getPayloadResponse,
-	}
 }
 
 func (rs *Relay) GetPayloadDelivered(ctx context.Context, query structs.TraceQuery) ([]structs.BidTraceExtended, error) {

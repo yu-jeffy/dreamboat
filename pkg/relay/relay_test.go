@@ -1,4 +1,4 @@
-package relay_test
+package relay
 
 import (
 	"context"
@@ -88,14 +88,14 @@ func TestGetHeader(t *testing.T) {
 	request["parent_hash"] = submitRequest.ExecutionPayload.ParentHash.String()
 	request["pubkey"] = registration.Message.Pubkey.String()
 
-	signedBuilderBid, _ := relay.SubmitBlockRequestToSignedBuilderBid(
+	signedBuilderBid, _ := SubmitBlockRequestToSignedBuilderBid(
 		submitRequest,
 		sk,
 		&config.PubKey,
 		relaySigningDomain,
 	)
 
-	payload := relay.SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitRequest)
+	payload := SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitRequest)
 
 	// fill the datastore
 	key := relay.SubmissionToKey(submitRequest)

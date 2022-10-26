@@ -13,7 +13,6 @@ import (
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/google/uuid"
-	"github.com/ipfs/go-datastore"
 	ds "github.com/ipfs/go-datastore"
 	ds_sync "github.com/ipfs/go-datastore/sync"
 	badger "github.com/ipfs/go-ds-badger2"
@@ -197,14 +196,14 @@ func TestPutGetHeaderBatch(t *testing.T) {
 	const N = 10
 
 	batch := make([]structs.HeaderAndTrace, 0)
-	queries := make([]Query, 0)
+	slots := make([]structs.Slot, 0)
 
 	for i := 0; i < N; i++ {
 		header := randomHeaderAndTrace()
 		slot := structs.Slot(rand.Int())
 
 		batch = append(batch, header)
-		queries = append(queries, Query{Slot: slot})
+		slots = append(slots, slot)
 	}
 
 	sort.Slice(batch, func(i, j int) bool {
@@ -217,10 +216,10 @@ func TestPutGetHeaderBatch(t *testing.T) {
 		store := newMockDatastore()
 		ds := Datastore{s: store}
 		for i, payload := range batch {
-			ds.PutHeader(ctx, queries[i].Slot, payload, time.Minute)
+			ds.PutHeader(ctx, slots[i], payload, time.Minute)
 		}
 		// get
-		gotBatch, err := ds.GetHeaderBatch(ctx, queries)
+		gotBatch, err := ds.GetHeadersBySlots(ctx, slots)
 		require.NoError(t, err)
 		sort.Slice(gotBatch, func(i, j int) bool {
 			return gotBatch[i].Trace.Slot < gotBatch[j].Trace.Slot
@@ -237,10 +236,10 @@ func TestPutGetHeaderBatch(t *testing.T) {
 		ds := Datastore{s: store}
 
 		for i, payload := range batch {
-			ds.PutHeader(ctx, queries[i].Slot, payload, time.Minute)
+			ds.PutHeader(ctx, slots[i], payload, time.Minute)
 		}
 		// get
-		gotBatch, err := ds.GetHeaderBatch(ctx, queries)
+		gotBatch, err := ds.GetHeadersBySlots(ctx, slots)
 		require.NoError(t, err)
 		sort.Slice(gotBatch, func(i, j int) bool {
 			return gotBatch[i].Trace.Slot < gotBatch[j].Trace.Slot
@@ -260,7 +259,7 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 
 	headers := make([]structs.HeaderAndTrace, 0)
 	batch := make([]structs.BidTraceWithTimestamp, 0)
-	queries := make([]Query, 0)
+	slots := make([]structs.Slot, 0)
 
 	for i := 0; i < N; i++ {
 		header := randomHeaderAndTrace()
@@ -268,7 +267,7 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 
 		headers = append(headers, header)
 		batch = append(batch, *header.Trace)
-		queries = append(queries, Query{Slot: slot})
+		slots = append(slots, slot)
 	}
 
 	sort.Slice(batch, func(i, j int) bool {
@@ -278,20 +277,20 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 	store := newMockDatastore()
 	ds := Datastore{s: store}
 	for i, header := range headers {
-		err := ds.PutHeader(ctx, queries[i].Slot, header, time.Minute)
+		err := ds.PutHeader(ctx, slots[i], header, time.Minute)
 		require.NoError(t, err)
 	}
 	// get
-	gotBatch, _ := ds.GetDeliveredBatch(ctx, queries)
+	gotBatch, _ := ds.GetDeliveredBySlots(ctx, slots)
 	require.Len(t, gotBatch, 0)
 
 	for i, header := range headers {
 		trace := structs.DeliveredTrace{Trace: *header.Trace, BlockNumber: header.Header.BlockNumber}
-		err := ds.PutDelivered(ctx, queries[i].Slot, trace, time.Minute)
+		err := ds.PutDelivered(ctx, slots[i], trace, time.Minute)
 		require.NoError(t, err)
 	}
 
-	gotBatch, err := ds.GetDeliveredBatch(ctx, queries)
+	gotBatch, err := ds.GetDeliveredBySlots(ctx, slots)
 	require.NoError(t, err)
 	sort.Slice(gotBatch, func(i, j int) bool {
 		return gotBatch[i].BidTrace.Slot < gotBatch[j].BidTrace.Slot
@@ -313,11 +312,12 @@ func TestPutGetPayload(t *testing.T) {
 	payload := randomBlockBidAndTrace()
 
 	// put
-	key := structs.PayloadKey{
+	key := structs.PayloadKeyKey(structs.PayloadKey{
 		BlockHash: payload.Trace.Message.BlockHash,
 		Proposer:  payload.Trace.Message.ProposerPubkey,
 		Slot:      structs.Slot(payload.Trace.Message.Slot),
-	}
+	})
+
 	err := ds.PutPayload(ctx, key, payload, time.Minute)
 	require.NoError(t, err)
 
@@ -410,7 +410,7 @@ func BenchmarkGetRegistration(b *testing.B) {
 	var datadir = "/tmp/" + b.Name() + uuid.New().String()
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := Datastore{TTLStorage: &relay.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := Datastore{s: store}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -496,7 +496,7 @@ func randomPayload() *types.ExecutionPayload {
 	}
 }
 
-func randomBlockBidAndTrace() *relay.BlockBidAndTrace {
+func randomBlockBidAndTrace() *structs.BlockBidAndTrace {
 
 	sk, _, _ := bls.GenerateNewKeypair()
 
@@ -505,7 +505,7 @@ func randomBlockBidAndTrace() *relay.BlockBidAndTrace {
 	payload := randomPayload()
 	GenesisForkVersionMainnet := "0x00000000"
 
-	relaySigningDomain, _ := relay.ComputeDomain(
+	relaySigningDomain, _ := structs.ComputeDomain(
 		types.DomainTypeAppBuilder,
 		GenesisForkVersionMainnet,
 		types.Root{}.String())
@@ -528,15 +528,14 @@ func randomBlockBidAndTrace() *relay.BlockBidAndTrace {
 		ExecutionPayload: payload,
 	}
 
-	signedBuilderBid, _ := relay.SubmitBlockRequestToSignedBuilderBid(
+	signedBuilderBid, _ := structs.SubmitBlockRequestToSignedBuilderBid(
 		submitRequest,
 		sk,
 		&pk,
 		relaySigningDomain,
 	)
 
-	blockBidAndTrace := relay.SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitRequest)
-
+	blockBidAndTrace := structs.SubmitBlockRequestToBlockBidAndTrace(signedBuilderBid, submitRequest)
 	return &blockBidAndTrace
 }
 
@@ -668,13 +667,13 @@ func random256Bytes() (b [256]byte) {
 	return b
 }
 
-type mockDatastore struct{ datastore.Datastore }
+type mockDatastore struct{ ds.Datastore }
 
 func newMockDatastore() mockDatastore {
-	return mockDatastore{ds_sync.MutexWrap(datastore.NewMapDatastore())}
+	return mockDatastore{ds_sync.MutexWrap(ds.NewMapDatastore())}
 }
 
-func (d mockDatastore) PutWithTTL(ctx context.Context, key datastore.Key, value []byte, ttl time.Duration) error {
+func (d mockDatastore) PutWithTTL(ctx context.Context, key ds.Key, value []byte, ttl time.Duration) error {
 	go func() {
 		time.Sleep(ttl)
 		d.Delete(ctx, key)

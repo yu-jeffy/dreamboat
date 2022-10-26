@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 
 	"net"
 	"net/http"
@@ -16,8 +15,8 @@ import (
 	beaconCli "github.com/blocknative/dreamboat/pkg/client/beacon"
 	"github.com/blocknative/dreamboat/pkg/relay"
 	"github.com/blocknative/dreamboat/pkg/store/datastore"
+	"github.com/blocknative/dreamboat/pkg/structs"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
@@ -216,12 +215,12 @@ func run() cli.ActionFunc {
 			return err
 		}
 
-		domainBuilder, err := ComputeDomain(types.DomainTypeAppBuilder, cfg.GenesisForkVersion, types.Root{}.String())
+		domainBuilder, err := structs.ComputeDomain(types.DomainTypeAppBuilder, cfg.GenesisForkVersion, types.Root{}.String())
 		if err != nil {
 			return err
 		}
 
-		domainBeaconProposer, err := ComputeDomain(types.DomainTypeBeaconProposer, cfg.BellatrixForkVersion, cfg.GenesisValidatorsRoot)
+		domainBeaconProposer, err := structs.ComputeDomain(types.DomainTypeBeaconProposer, cfg.BellatrixForkVersion, cfg.GenesisValidatorsRoot)
 		if err != nil {
 			return err
 		}
@@ -275,17 +274,4 @@ func run() cli.ActionFunc {
 		l.Info("http server listening")
 		return svr.ListenAndServe()
 	}
-}
-
-// ComputeDomain computes the signing domain
-func ComputeDomain(domainType types.DomainType, forkVersionHex string, genesisValidatorsRootHex string) (domain types.Domain, err error) {
-	genesisValidatorsRoot := types.Root(common.HexToHash(genesisValidatorsRootHex))
-	forkVersionBytes, err := hexutil.Decode(forkVersionHex)
-	if err != nil || len(forkVersionBytes) > 4 {
-		err = errors.New("invalid fork version passed")
-		return domain, err
-	}
-	var forkVersion [4]byte
-	copy(forkVersion[:], forkVersionBytes[:4])
-	return types.ComputeDomain(domainType, forkVersion, genesisValidatorsRoot), nil
 }

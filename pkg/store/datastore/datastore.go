@@ -29,11 +29,11 @@ type Query struct {
 
 type Datastore struct {
 	s  TTLStorage
-	mu sync.RWMutex
+	mu *sync.RWMutex
 }
 
 func NewDatastore(s TTLStorage) *Datastore {
-	return &Datastore{s: s}
+	return &Datastore{s: s, mu: &sync.RWMutex{}}
 }
 
 func (s *Datastore) Close() error {
