@@ -1,3 +1,5 @@
+//go:generate mockgen  -destination=./mocks/relay.go -package=mocks github.com/blocknative/dreamboat/pkg/api Relay
+
 package api
 
 import (
@@ -69,7 +71,6 @@ type API struct {
 }
 
 func NewApi(l log.Logger, relay Relay) (a *API) {
-
 	return &API{l: l, relay: relay}
 }
 

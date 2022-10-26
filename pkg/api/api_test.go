@@ -2,15 +2,13 @@ package api
 
 import (
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
-	mock_relay "github.com/blocknative/dreamboat/internal/mock/pkg"
-	relay "github.com/blocknative/dreamboat/pkg"
+	"github.com/blocknative/dreamboat/pkg/api/mocks"
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/golang/mock/gomock"
@@ -22,7 +20,7 @@ var (
 	logger = log.New(log.WithWriter(io.Discard))
 )
 
-func TestServerRouting(t *testing.T) {
+func TestMuxRouting(t *testing.T) {
 	t.Parallel()
 
 	ctrl := gomock.NewController(t)
@@ -31,16 +29,14 @@ func TestServerRouting(t *testing.T) {
 	t.Run("Status", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathStatus, nil)
 		w := httptest.NewRecorder()
-
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 
 		require.EqualValues(t, w.Code, http.StatusOK)
 	})
@@ -48,106 +44,99 @@ func TestServerRouting(t *testing.T) {
 	t.Run("RegisterValidator", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodPost, PathRegisterValidator, nil)
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			RegisterValidator(gomock.Any(), gomock.Any()).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("GetHeader", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathGetHeader, nil)
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			GetHeader(gomock.Any(), gomock.Any()).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("GetPayload", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathGetPayload, nil)
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			GetPayload(gomock.Any(), gomock.Any()).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("SubmitBlock", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
-
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 		req := httptest.NewRequest(http.MethodPost, PathSubmitBlock, nil)
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			SubmitBlock(gomock.Any(), gomock.Any()).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("GetValidators", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathGetValidators, nil)
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetValidators().
+		relay.EXPECT().
+			GetValidators(gomock.Any()).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("builderBlocksReceived", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathBuilderBlocksReceived, nil)
 		q := req.URL.Query()
@@ -156,20 +145,19 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, Slot: 100}).
+		relay.EXPECT().
+			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("builderBlocksReceived block_hash", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathBuilderBlocksReceived, nil)
 		q := req.URL.Query()
@@ -180,22 +168,21 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetBlockReceived(gomock.Any(), TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
+		relay.EXPECT().
+			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("builderBlocksReceived block_number", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathBuilderBlocksReceived, nil)
+		req := httptest.NewRequest(http.MethodGet, PathBuilderBlocksReceived, nil)
 		q := req.URL.Query()
 
 		q.Add("block_number", "100")
@@ -203,22 +190,21 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, BlockNum: 100}).
+		relay.EXPECT().
+			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("builderBlocksReceived limit", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathBuilderBlocksReceived, nil)
+		req := httptest.NewRequest(http.MethodGet, PathBuilderBlocksReceived, nil)
 		q := req.URL.Query()
 
 		q.Add("limit", "50")
@@ -226,67 +212,64 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: 50}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("builderBlocksReceived no limit", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathBuilderBlocksReceived, nil)
+		req := httptest.NewRequest(http.MethodGet, PathBuilderBlocksReceived, nil)
 		q := req.URL.Query()
 
 		req.URL.RawQuery = q.Encode()
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit}).
+		relay.EXPECT().
+			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("payloadDelivered", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 		q.Add("slot", "100")
 		req.URL.RawQuery = q.Encode()
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, Slot: 100}).
+		relay.EXPECT().
+			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("payloadDelivered block_hash", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 
 		blockHash := types.Hash(random32Bytes())
@@ -295,23 +278,22 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, BlockHash: blockHash}).
+		relay.EXPECT().
+			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 
 	t.Run("payloadDelivered block_number", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 
 		q.Add("block_number", "100")
@@ -319,22 +301,21 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, BlockNum: 100}).
+		relay.EXPECT().
+			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("payloadDelivered cursor", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 
 		q.Add("cursor", "50")
@@ -342,22 +323,21 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit, Cursor: 50}).
+		relay.EXPECT().
+			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Cursor: 50}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("payloadDelivered limit", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 
 		q.Add("limit", "50")
@@ -365,33 +345,32 @@ func TestServerRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
+		relay.EXPECT().
 			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: 50}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 	t.Run("payloadDelivered no limit", func(t *testing.T) {
 		t.Parallel()
 
-		service := mock_relay.NewMockRelayService(ctrl)
-		server := API{
-			Log:     logger,
-			Service: service,
-		}
+		relay := mocks.NewMockRelay(ctrl)
+		a := NewApi(logger, relay)
+		mux := http.NewServeMux()
+		a.AttachToHandler(mux)
 
-		req := httptest.NewRequest(http.MethodGet, relay.PathProposerPayloadsDelivered, nil)
+		req := httptest.NewRequest(http.MethodGet, PathProposerPayloadsDelivered, nil)
 		q := req.URL.Query()
 
 		req.URL.RawQuery = q.Encode()
 
 		w := httptest.NewRecorder()
 
-		service.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: relay.DataLimit}).
+		relay.EXPECT().
+			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
 			Times(1)
 
-		server.ServeHTTP(w, req)
+		mux.ServeHTTP(w, req)
 	})
 }
 
@@ -408,17 +387,16 @@ func BenchmarkAPISequential(b *testing.B) {
 	ctrl := gomock.NewController(b)
 	defer ctrl.Finish()
 
-	service := mock_relay.NewMockRelayService(ctrl)
-	api := API{
-		Service: service,
-		Log:     log.New(log.WithWriter(ioutil.Discard)),
-	}
+	relay := mocks.NewMockRelay(ctrl)
+	a := NewApi(logger, relay)
+	mux := http.NewServeMux()
+	a.AttachToHandler(mux)
 
-	service.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().GetValidators().AnyTimes()
-	service.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetValidators(gomock.Any()).AnyTimes()
+	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
 
 	w := httptest.NewRecorder()
 
@@ -426,7 +404,7 @@ func BenchmarkAPISequential(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		api.ServeHTTP(w, reqs[rand.Intn(len(reqs))])
+		mux.ServeHTTP(w, reqs[rand.Intn(len(reqs))])
 	}
 }
 
@@ -437,17 +415,16 @@ func BenchmarkAPIParallel(b *testing.B) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	service := mock_relay.NewMockRelayService(ctrl)
-	api := API{
-		Service: service,
-		Log:     log.New(log.WithWriter(ioutil.Discard)),
-	}
+	relay := mocks.NewMockRelay(ctrl)
+	a := NewApi(logger, relay)
+	mux := http.NewServeMux()
+	a.AttachToHandler(mux)
 
-	service.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().GetValidators().AnyTimes()
-	service.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
-	service.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetValidators(gomock.Any()).AnyTimes()
+	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
 
 	randReqs := make([]*http.Request, 0)
 	ws := make([]*httptest.ResponseRecorder, 0)
@@ -467,8 +444,13 @@ func BenchmarkAPIParallel(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		go func(i int) {
-			api.ServeHTTP(ws[i], randReqs[i])
+			mux.ServeHTTP(ws[i], randReqs[i])
 			wg.Done()
 		}(i)
 	}
+}
+
+func random32Bytes() (b [32]byte) {
+	rand.Read(b[:])
+	return b
 }
