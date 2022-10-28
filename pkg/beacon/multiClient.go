@@ -2,11 +2,16 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/lthibault/log"
+)
+
+var (
+	ErrNodesUnavailable = errors.New("beacon nodes are unavailable")
 )
 
 type MultiBeaconClient struct {
@@ -45,7 +50,7 @@ func (b *MultiBeaconClient) GetProposerDuties(epoch structs.Epoch) (*structs.Reg
 		return duties, nil
 	}
 
-	return nil, structs.ErrNodesUnavailable
+	return nil, ErrNodesUnavailable
 }
 
 func (b *MultiBeaconClient) SyncStatus() (*structs.SyncStatusPayloadData, error) {

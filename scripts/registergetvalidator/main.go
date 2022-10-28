@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
 	"github.com/blocknative/dreamboat/pkg/api"
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/pkg/errors"
@@ -26,9 +28,9 @@ func main() {
 }
 
 func registerValidator() error {
-	builderDomain, err := api.ComputeDomain(
+	builderDomain, err := structs.ComputeDomain(
 		types.DomainTypeAppBuilder,
-		relay.GenesisForkVersionRopsten,
+		config.GenesisForkVersionRopsten,
 		types.Root{}.String())
 	if err != nil {
 		return err

@@ -26,11 +26,6 @@ var (
 	badHeaderMsg             = "invalid block header from datastore"
 )
 
-const (
-	DurationPerSlot  = time.Second * 12
-	DurationPerEpoch = DurationPerSlot * time.Duration(structs.SlotsPerEpoch)
-)
-
 type RelayDatastore interface {
 	PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
 	GetHeaders(ctx context.Context, query structs.TraceQuery) ([]structs.HeaderAndTrace, error)
@@ -58,7 +53,6 @@ type Relay struct {
 
 	store RelayDatastore
 
-	//bstate                BeaconState
 	builderSigningDomain  types.Domain
 	proposerSigningDomain types.Domain
 }
@@ -511,7 +505,7 @@ func (rs *Relay) getTailDelivered(ctx context.Context, headSlot structs.Slot, li
 		}
 	}
 
-	stop := start - structs.Slot(ttl/DurationPerSlot)
+	stop := start - structs.Slot(ttl/structs.DurationPerSlot)
 
 	batch := make([]structs.BidTraceWithTimestamp, 0, limit)
 	//queries := make([]Query, 0, limit)
@@ -581,7 +575,7 @@ func (rs *Relay) GetBlockReceived(ctx context.Context, headSlot structs.Slot, qu
 
 func (rs *Relay) getTailBlockReceived(ctx context.Context, headslot structs.Slot, limit uint64, ttl time.Duration) ([]structs.BidTraceWithTimestamp, error) {
 	batch := make([]structs.HeaderAndTrace, 0, limit)
-	stop := headslot - structs.Slot(ttl/DurationPerSlot)
+	stop := headslot - structs.Slot(ttl/structs.DurationPerSlot)
 
 	rs.l.WithField("limit", limit).
 		WithField("start", headslot).

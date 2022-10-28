@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"net"
 	"net/http"
 	"os"
 
@@ -26,7 +25,6 @@ import (
 	"github.com/lthibault/log"
 	blst "github.com/supranational/blst/bindings/go"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -136,7 +134,8 @@ func main() {
 
 func run() cli.ActionFunc {
 	return func(c *cli.Context) error {
-		g, ctx := errgroup.WithContext(c.Context)
+		//g, ctx := errgroup.WithContext(c.Context)
+		ctx := context.Background()
 
 		cfg = config.Config{
 			RelayRequestTimeout: c.Duration("timeout"),
@@ -151,7 +150,6 @@ func run() cli.ActionFunc {
 		l := log.New()
 
 		// DATASTORE INITIALIZATION
-
 		storage, err := badger.NewDatastore(cfg.Datadir, &badger.DefaultOptions)
 		if err != nil {
 			l.WithError(err).Fatal("failed to initialize datastore")
@@ -161,7 +159,6 @@ func run() cli.ActionFunc {
 		defer store.Close()
 
 		// BEACON MANAGER INITIALIZATION
-
 		clients := make([]*beaconCli.BeaconClient, 0, len(cfg.BeaconEndpoints))
 		for _, endpoint := range cfg.BeaconEndpoints {
 			client, err := beaconCli.NewBeaconClient(endpoint, l)
@@ -241,20 +238,17 @@ func run() cli.ActionFunc {
 			IdleTimeout:    time.Second * 2,
 			MaxHeaderBytes: 4096,
 			Handler:        mux,
-			BaseContext: func(l net.Listener) context.Context { // TODO(l): remove this
-				return ctx
-			},
 		}
 
-		g.Go(func() error {
+		go func(ctx context.Context, srv *http.Server) {
 			defer svr.Close()
 			<-ctx.Done()
 
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
 
-			return svr.Shutdown(ctx)
-		})
+			srv.Shutdown(ctx)
+		}(ctx, &svr)
 
 		l.Info("http server listening")
 		return svr.ListenAndServe()

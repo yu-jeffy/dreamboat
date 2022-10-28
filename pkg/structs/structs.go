@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flashbots/go-boost-utils/types"
 	ds "github.com/ipfs/go-datastore"
 )
 
 const (
-	SlotsPerEpoch Slot = 32
+	SlotsPerEpoch   Slot = 32
+	DurationPerSlot      = time.Second * 12
 )
 
 type PubKey struct{ types.PublicKey }

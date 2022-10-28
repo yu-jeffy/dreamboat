@@ -12,8 +12,15 @@ import (
 )
 
 var (
+	DurationPerEpoch = structs.DurationPerSlot * time.Duration(structs.SlotsPerEpoch)
+)
+var (
 	ErrBeaconNodeSyncing = errors.New("beacon node is syncing")
 )
+
+type Datastore interface {
+	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
+}
 
 type BeaconClient interface {
 	SubscribeToHeadEvents(ctx context.Context, slotC chan structs.HeadEvent)
@@ -38,11 +45,13 @@ type BeaconManager struct {
 	l      log.Logger
 	client BeaconClient
 
-	memoryStore BeaconState
+	store Datastore
+
+	beaconStore BeaconState
 }
 
-func NewBeaconManager(l log.Logger, memoryStore BeaconState, client BeaconClient) *BeaconManager {
-	return &BeaconManager{l: l, memoryStore: memoryStore, client: client}
+func NewBeaconManager(l log.Logger, beaconStore BeaconState, client BeaconClient) *BeaconManager {
+	return &BeaconManager{l: l, beaconStore: beaconStore, client: client}
 }
 
 func (bm *BeaconManager) BeaconEventLoop(ctx context.Context) error {
@@ -104,15 +113,16 @@ func (bm *BeaconManager) processNewSlot(ctx context.Context, updateProposerDurat
 	},
 	).Debugf("updated headSlot to %d", received)
 
+	// BUG(l): It will trigger multiple times
 	// update proposer duties and known validators in the background
-	if updateProposerDuration < time.Since(bm.memoryStore.UpdateTime()) { // only update every half DurationPerEpoch
+	if updateProposerDuration < time.Since(bm.beaconStore.UpdateTime()) { // only update every half DurationPerEpoch
 		go func() {
 			if err := bm.updateKnownValidators(ctx, received); err != nil {
 				bm.l.WithError(err).Warn("failed to update known validators")
-			} else {
-				bm.memoryStore.SetUpdateTime(time.Now().Unix())
-				s.setReady()
+				return
 			}
+			bm.beaconStore.SetUpdateTime(time.Now().Unix())
+			s.setReady()
 		}()
 	}
 
@@ -143,7 +153,7 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 
 	timeStart := time.Now()
 
-	state := dutiesState{}
+	//state := dutiesState{}
 
 	// Query current epoch
 	current, err := bm.client.GetProposerDuties(epoch)
@@ -160,8 +170,9 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 	}
 	entries = append(entries, next.Data...)
 
-	state.proposerDutiesResponse = make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
-	state.currentSlot = headSlot
+	//state.proposerDutiesResponse = make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
+	pdr := make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
+	bm.beaconStore.SetHeadSlot(headSlot)
 
 	for _, e := range entries {
 		reg, err := bm.store.GetRegistration(ctx, e.PubKey)
@@ -169,7 +180,7 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 			logger.With(e.PubKey).
 				Debug("new proposer duty")
 
-			state.proposerDutiesResponse = append(state.proposerDutiesResponse, types.BuilderGetValidatorsResponseEntry{
+			pdr = append(pdr, types.BuilderGetValidatorsResponseEntry{
 				Slot:  e.Slot,
 				Entry: &reg,
 			})
@@ -177,13 +188,13 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 			logger.Warn(err)
 		}
 	}
-
-	s.state.duties.Store(state)
+	bm.beaconStore.HeadSlot(pdr)
 
 	logger.With(log.F{
-		"processingTimeMs": time.Since(timeStart).Milliseconds(),
-		"receivedDuties":   len(entries),
-	}).With(state.proposerDutiesResponse).Debug("proposer duties updated")
+		"processingTimeMs":      time.Since(timeStart).Milliseconds(),
+		"receivedDuties":        len(entries),
+		"builderValidatorsKeys": pdr,
+	}).Debug("proposer duties updated")
 
 	return nil
 }
@@ -199,7 +210,7 @@ func (bm *BeaconManager) updateKnownValidators(ctx context.Context, current stru
 	}
 
 	for _, vs := range validators.Data {
-		bm.memoryStore.SetKnownValidator(types.NewPubkeyHex(vs.Validator.Pubkey), vs.Index)
+		bm.beaconStore.SetKnownValidator(types.NewPubkeyHex(vs.Validator.Pubkey), vs.Index)
 	}
 	/*
 		knownValidators := make(map[types.PubkeyHex]struct{})

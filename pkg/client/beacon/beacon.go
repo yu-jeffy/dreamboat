@@ -17,7 +17,6 @@ import (
 
 var (
 	ErrHTTPErrorResponse = errors.New("got an HTTP error response")
-	ErrNodesUnavailable  = errors.New("beacon nodes are unavailable")
 )
 
 type BeaconClient struct {
@@ -36,47 +35,9 @@ func NewBeaconClient(endpoint string, l log.Logger) (*BeaconClient, error) {
 	return bc, err
 }
 
-/*
-func (b *BeaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan HeadEvent) {
-	logger := b.log.WithField("method", "SubscribeToHeadEvents")
-
-	eventsURL := fmt.Sprintf("%s/eth/v1/events?topics=head", b.beaconEndpoint.String())
-
-	go func() {
-		defer logger.Debug("head events subscription stopped")
-
-		for {
-			client := sse.NewClient(eventsURL)
-			err := client.SubscribeRawWithContext(ctx, func(msg *sse.Event) {
-				var head HeadEvent
-				if err := json.Unmarshal(msg.Data, &head); err != nil {
-					logger.WithError(err).Debug("event subscription failed")
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case slotC <- head:
-					logger.
-						With(head).
-						Debug("read head subscription")
-				}
-			})
-
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return
-			}
-
-			logger.WithError(err).Debug("beacon subscription failed, restarting...")
-		}
-	}()
-}*/
-
 func (b *BeaconClient) SubscribeToHeadEvents(ctx context.Context, slotC chan structs.HeadEvent) {
 	logger := b.log.WithField("method", "SubscribeToHeadEvents")
-
 	eventsURL := fmt.Sprintf("%s/eth/v1/events?topics=head", b.beaconEndpoint.String())
-
 	defer logger.Debug("head events subscription stopped")
 
 	for {

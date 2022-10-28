@@ -8,7 +8,9 @@ import (
 	"math/rand"
 	"net/http"
 
+	"github.com/blocknative/dreamboat/cmd/dreamboat/config"
 	"github.com/blocknative/dreamboat/pkg/api"
+	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
@@ -32,9 +34,9 @@ func main() {
 }
 
 func getPayload() error {
-	builderDomain, err := relay.ComputeDomain(
+	builderDomain, err := structs.ComputeDomain(
 		types.DomainTypeAppBuilder,
-		relay.GenesisForkVersionRopsten,
+		config.GenesisForkVersionRopsten,
 		types.Root{}.String())
 	if err != nil {
 		return err
