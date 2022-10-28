@@ -15,6 +15,7 @@ type BeaconMemstore struct {
 	updateTimeUnix int64
 
 	proposerDutiesResponse []types.BuilderGetValidatorsResponseEntry
+	pDMutex                sync.RWMutex
 
 	knownValidatorsByIndex map[uint64]types.PubkeyHex
 	knownValidators        map[types.PubkeyHex]struct{}
@@ -23,6 +24,13 @@ type BeaconMemstore struct {
 
 func NewBeaconMemstore() *BeaconMemstore {
 	return &BeaconMemstore{}
+}
+
+func (bms *BeaconMemstore) SetKnownValidators(knownValidators map[types.PubkeyHex]struct{}, knownValidatorsByIndex map[uint64]types.PubkeyHex) {
+	bms.kvMutex.Lock()
+	defer bms.kvMutex.Unlock()
+	bms.knownValidatorsByIndex = knownValidatorsByIndex
+	bms.knownValidators = knownValidators
 }
 
 func (bms *BeaconMemstore) SetKnownValidator(pubkey types.PubkeyHex, index uint64) {
@@ -68,6 +76,14 @@ func (bms *BeaconMemstore) HeadSlot() structs.Slot {
 	return structs.Slot(bms.headSlot)
 }
 
+func (bms *BeaconMemstore) SetProposerDutiesResponse(vrsep []types.BuilderGetValidatorsResponseEntry) {
+	bms.pDMutex.Lock()
+	bms.proposerDutiesResponse = vrsep
+	defer bms.pDMutex.Unlock()
+}
+
 func (bms *BeaconMemstore) ValidatorsMap() []types.BuilderGetValidatorsResponseEntry {
-	return []types.BuilderGetValidatorsResponseEntry{}
+	bms.pDMutex.RLock()
+	defer bms.pDMutex.RUnlock()
+	return bms.proposerDutiesResponse
 }

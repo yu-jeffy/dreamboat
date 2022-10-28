@@ -31,11 +31,13 @@ type BeaconClient interface {
 }
 
 type BeaconState interface {
-	SetKnownValidator(pubkey types.PubkeyHex, index uint64)
 	KnownValidatorByIndex(index uint64) types.PubkeyHex
-	IsKnownValidator(pk types.PubkeyHex) bool
+
 	SetHeadSlot(sl structs.Slot)
 	HeadSlot() structs.Slot
+
+	SetKnownValidators(knownValidators map[types.PubkeyHex]struct{}, knownValidatorsByIndex map[uint64]types.PubkeyHex)
+	SetProposerDutiesResponse(vrsep []types.BuilderGetValidatorsResponseEntry)
 
 	SetUpdateTime(unixTime int64)
 	UpdateTime() time.Time
@@ -153,8 +155,6 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 
 	timeStart := time.Now()
 
-	//state := dutiesState{}
-
 	// Query current epoch
 	current, err := bm.client.GetProposerDuties(epoch)
 	if err != nil {
@@ -170,7 +170,6 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 	}
 	entries = append(entries, next.Data...)
 
-	//state.proposerDutiesResponse = make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
 	pdr := make([]types.BuilderGetValidatorsResponseEntry, 0, len(entries))
 	bm.beaconStore.SetHeadSlot(headSlot)
 
@@ -188,7 +187,9 @@ func (bm *BeaconManager) updateProposerDuties(ctx context.Context, headSlot stru
 			logger.Warn(err)
 		}
 	}
-	bm.beaconStore.HeadSlot(pdr)
+	if pdr != nil {
+		bm.beaconStore.SetProposerDutiesResponse(pdr)
+	}
 
 	logger.With(log.F{
 		"processingTimeMs":      time.Since(timeStart).Milliseconds(),
@@ -203,28 +204,30 @@ func (bm *BeaconManager) updateKnownValidators(ctx context.Context, current stru
 	logger := bm.l.WithField("method", "UpdateKnownValidators")
 	timeStart := time.Now()
 
-	//state := validatorsState{}
 	validators, err := bm.client.KnownValidators(current)
 	if err != nil {
 		return err
 	}
-
-	for _, vs := range validators.Data {
-		bm.beaconStore.SetKnownValidator(types.NewPubkeyHex(vs.Validator.Pubkey), vs.Index)
-	}
 	/*
-		knownValidators := make(map[types.PubkeyHex]struct{})
-		knownValidatorsByIndex := make(map[uint64]types.PubkeyHex)
 		for _, vs := range validators.Data {
-			knownValidators[types.NewPubkeyHex(vs.Validator.Pubkey)] = struct{}{}
-			knownValidatorsByIndex[vs.Index] = types.NewPubkeyHex(vs.Validator.Pubkey)
+			bm.beaconStore.SetKnownValidator(types.NewPubkeyHex(vs.Validator.Pubkey), vs.Index)
 		}
+	*/
+	// TODO(l): possibly no need to realocate/replace
+	knownValidators := make(map[types.PubkeyHex]struct{})
+	knownValidatorsByIndex := make(map[uint64]types.PubkeyHex)
+	for _, vs := range validators.Data {
+		knownValidators[types.NewPubkeyHex(vs.Validator.Pubkey)] = struct{}{}
+		knownValidatorsByIndex[vs.Index] = types.NewPubkeyHex(vs.Validator.Pubkey)
+	}
 
+	bm.beaconStore.SetKnownValidators(knownValidators, knownValidatorsByIndex)
+	/*
 		state.knownValidators = knownValidators
 		state.knownValidatorsByIndex = knownValidatorsByIndex
-
-		s.state.validators.Store(state)
 	*/
+	//	s.state.validators.Store(state)
+
 	logger.With(log.F{
 		"slotHead":         uint64(current),
 		"numValidators":    len(knownValidators),

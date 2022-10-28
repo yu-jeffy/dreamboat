@@ -61,7 +61,7 @@ func TestPutGetHeaderDuplicate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ds := Datastore{s: newMockDatastore()}
+	ds := NewDatastore(newMockDatastore())
 
 	header := randomHeaderAndTrace()
 	slot := structs.Slot(rand.Int())
@@ -139,7 +139,7 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d := Datastore{s: newMockDatastore()}
+	d := NewDatastore(newMockDatastore())
 
 	header := randomHeaderAndTrace()
 	slot := structs.Slot(rand.Int())
@@ -213,8 +213,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 	t.Run("Mock", func(t *testing.T) {
 		t.Parallel()
 
-		store := newMockDatastore()
-		ds := Datastore{s: store}
+		ds := NewDatastore(newMockDatastore())
 		for i, payload := range batch {
 			ds.PutHeader(ctx, slots[i], payload, time.Minute)
 		}
@@ -334,7 +333,7 @@ func TestPutGetRegistration(t *testing.T) {
 	defer cancel()
 
 	store := newMockDatastore()
-	ds := Datastore{s: store}
+	ds := NewDatastore(store)
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}

@@ -20,13 +20,6 @@ type TTLStorage interface {
 	Close() error
 }
 
-type Query struct {
-	Slot      structs.Slot
-	BlockHash types.Hash
-	BlockNum  uint64
-	PubKey    types.PublicKey
-}
-
 type Datastore struct {
 	s  TTLStorage
 	mu *sync.RWMutex
