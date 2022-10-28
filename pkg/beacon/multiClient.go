@@ -45,7 +45,7 @@ func (b *MultiBeaconClient) GetProposerDuties(epoch structs.Epoch) (*structs.Reg
 		return duties, nil
 	}
 
-	return nil, ErrNodesUnavailable
+	return nil, structs.ErrNodesUnavailable
 }
 
 func (b *MultiBeaconClient) SyncStatus() (*structs.SyncStatusPayloadData, error) {

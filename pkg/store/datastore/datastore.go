@@ -75,7 +75,7 @@ func (s *Datastore) PutHeader(ctx context.Context, slot structs.Slot, header str
 	return s.s.PutWithTTL(ctx, HeaderKey(slot), data, ttl)
 }
 
-func (s *Datastore) GetHeaders(ctx context.Context, query Query) ([]structs.HeaderAndTrace, error) {
+func (s *Datastore) GetHeaders(ctx context.Context, query structs.TraceQuery) ([]structs.HeaderAndTrace, error) {
 	key, err := s.queryToHeaderKey(ctx, query)
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (s *Datastore) GetHeaders(ctx context.Context, query Query) ([]structs.Head
 }
 
 func (s *Datastore) GetHeadersBySlot(ctx context.Context, slot structs.Slot) ([]structs.HeaderAndTrace, error) {
-	return s.GetHeaders(ctx, Query{Slot: slot})
+	return s.GetHeaders(ctx, structs.TraceQuery{Slot: slot})
 }
 
 func (s *Datastore) getHeaders(ctx context.Context, key ds.Key) ([]structs.HeaderAndTrace, error) {
@@ -103,7 +103,7 @@ func (s *Datastore) getHeaders(ctx context.Context, key ds.Key) ([]structs.Heade
 	return s.unsmarshalHeaders(data)
 }
 
-func (s *Datastore) deduplicateHeaders(headers []structs.HeaderAndTrace, query Query) []structs.HeaderAndTrace {
+func (s *Datastore) deduplicateHeaders(headers []structs.HeaderAndTrace, query structs.TraceQuery) []structs.HeaderAndTrace {
 	filtered := headers[:0]
 	for _, header := range headers {
 		if (query.BlockHash != types.Hash{}) && (query.BlockHash != header.Header.BlockHash) {
@@ -115,7 +115,7 @@ func (s *Datastore) deduplicateHeaders(headers []structs.HeaderAndTrace, query Q
 		if (query.Slot != 0) && (uint64(query.Slot) != header.Trace.Slot) {
 			continue
 		}
-		if (query.PubKey != types.PublicKey{}) && (query.PubKey != header.Trace.ProposerPubkey) {
+		if (query.Pubkey != types.PublicKey{}) && (query.Pubkey != header.Trace.ProposerPubkey) {
 			continue
 		}
 		filtered = append(filtered, header)
@@ -147,7 +147,7 @@ func (s *Datastore) PutDelivered(ctx context.Context, slot structs.Slot, trace s
 	return s.s.PutWithTTL(ctx, DeliveredKey(slot), data, ttl)
 }
 
-func (s *Datastore) GetDelivered(ctx context.Context, query Query) (structs.BidTraceWithTimestamp, error) {
+func (s *Datastore) GetDelivered(ctx context.Context, query structs.TraceQuery) (structs.BidTraceWithTimestamp, error) {
 	key, err := s.queryToDeliveredKey(ctx, query)
 	if err != nil {
 		return structs.BidTraceWithTimestamp{}, err
@@ -156,7 +156,7 @@ func (s *Datastore) GetDelivered(ctx context.Context, query Query) (structs.BidT
 }
 
 func (s *Datastore) GetDeliveredBySlot(ctx context.Context, slot structs.Slot) (structs.BidTraceWithTimestamp, error) {
-	return s.GetDelivered(ctx, Query{Slot: slot})
+	return s.GetDelivered(ctx, structs.TraceQuery{Slot: slot})
 }
 
 func (s *Datastore) getDelivered(ctx context.Context, key ds.Key) (structs.BidTraceWithTimestamp, error) {
@@ -320,7 +320,7 @@ func (s *Datastore) GetRegistration(ctx context.Context, pk structs.PubKey) (typ
 	return registration, err
 }
 
-func (s *Datastore) queryToHeaderKey(ctx context.Context, query Query) (ds.Key, error) {
+func (s *Datastore) queryToHeaderKey(ctx context.Context, query structs.TraceQuery) (ds.Key, error) {
 	var (
 		rawKey []byte
 		err    error
@@ -344,7 +344,7 @@ func (s *Datastore) queryToHeaderKey(ctx context.Context, query Query) (ds.Key, 
 	return ds.NewKey(string(rawKey)), nil
 }
 
-func (s *Datastore) queryToDeliveredKey(ctx context.Context, query Query) (ds.Key, error) {
+func (s *Datastore) queryToDeliveredKey(ctx context.Context, query structs.TraceQuery) (ds.Key, error) {
 	var (
 		rawKey []byte
 		err    error
@@ -358,9 +358,9 @@ func (s *Datastore) queryToDeliveredKey(ctx context.Context, query Query) (ds.Ke
 		s.mu.RLock()
 		rawKey, err = s.s.Get(ctx, DeliveredNumKey(query.BlockNum))
 		s.mu.RUnlock()
-	} else if (query.PubKey != types.PublicKey{}) {
+	} else if (query.Pubkey != types.PublicKey{}) {
 		s.mu.RLock()
-		rawKey, err = s.s.Get(ctx, DeliveredPubkeyKey(query.PubKey))
+		rawKey, err = s.s.Get(ctx, DeliveredPubkeyKey(query.Pubkey))
 		s.mu.RUnlock()
 	} else {
 		rawKey = DeliveredKey(query.Slot).Bytes()

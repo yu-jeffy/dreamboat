@@ -1,5 +1,7 @@
 package structs
 
+import "github.com/flashbots/go-boost-utils/types"
+
 // SyncStatusPayload is the response payload for /eth/v1/node/syncing
 type SyncStatusPayload struct {
 	Data SyncStatusPayloadData
@@ -49,4 +51,9 @@ type ValidatorResponseEntry struct {
 
 type ValidatorResponseValidatorData struct {
 	Pubkey string `json:"pubkey"`
+}
+
+type CheckedSignedValidatorRegistration struct {
+	types.SignedValidatorRegistration
+	VerifiedPublicKey bool
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/blocknative/dreamboat/pkg/beacon"
 	beaconCli "github.com/blocknative/dreamboat/pkg/client/beacon"
 	"github.com/blocknative/dreamboat/pkg/relay"
+	"github.com/blocknative/dreamboat/pkg/store/beacon/memstore"
 	"github.com/blocknative/dreamboat/pkg/store/datastore"
 	"github.com/blocknative/dreamboat/pkg/structs"
 
@@ -125,21 +126,17 @@ func main() {
 		Usage:   "ethereum 2.0 relay, commissioned and put to sea by Blocknative",
 		Version: version,
 		Flags:   flags,
-		Before:  setup(),
 		Action:  run(),
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		l.Fatal(err)
+		log.Fatal(err)
 	}
 }
 
-func setup() cli.BeforeFunc {
-	return func(c *cli.Context) (err error) {
-		sk, pk, err := setupKeys(c)
-		if err != nil {
-			return err
-		}
+func run() cli.ActionFunc {
+	return func(c *cli.Context) error {
+		g, ctx := errgroup.WithContext(c.Context)
 
 		cfg = config.Config{
 			RelayRequestTimeout: c.Duration("timeout"),
@@ -147,36 +144,11 @@ func setup() cli.BeforeFunc {
 			BuilderCheck:        c.Bool("check-builder"),
 			BuilderURLs:         c.StringSlice("builder"),
 			BeaconEndpoints:     c.StringSlice("beacon"),
-			PubKey:              pk,
-			SecretKey:           sk,
 			Datadir:             c.String("datadir"),
 			CheckKnownValidator: c.Bool("checkKnownValidator"),
 		}
 
-		return
-	}
-}
-
-func setupKeys(c *cli.Context) (*blst.SecretKey, types.PublicKey, error) {
-	skBytes, err := hexutil.Decode(c.String("secretKey"))
-	if err != nil {
-		return nil, types.PublicKey{}, err
-	}
-	sk, err := bls.SecretKeyFromBytes(skBytes[:])
-	if err != nil {
-		return nil, types.PublicKey{}, err
-	}
-
-	var pk types.PublicKey
-	err = pk.FromSlice(bls.PublicKeyFromSecretKey(sk).Compress())
-	return sk, pk, err
-}
-
-func run() cli.ActionFunc {
-	return func(c *cli.Context) error {
-		g, ctx := errgroup.WithContext(c.Context)
-
-		l := log.New() //.WithField("service", "RelayService")
+		l := log.New()
 
 		// DATASTORE INITIALIZATION
 
@@ -199,6 +171,7 @@ func run() cli.ActionFunc {
 			clients = append(clients, client)
 		}
 
+		memoryStore := memstore.NewBeaconMemstore()
 		multiBClient := beacon.NewMultiBeaconClient(l.WithField("service", "multi-beacon client"), clients)
 		/*if err != nil {
 			l.WithError(err).Warn("failed beacon client registration")
@@ -207,7 +180,7 @@ func run() cli.ActionFunc {
 
 		l.Info("beacon client initialized")
 
-		bm := beacon.NewBeaconManager(l, multiBClient)
+		bm := beacon.NewBeaconManager(l, memoryStore, multiBClient)
 		go bm.BeaconEventLoop(ctx)
 
 		// RELAY INITIALIZATION
@@ -224,8 +197,20 @@ func run() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		r, err := relay.NewRelay(cfg, l, store, domainBuilder, domainBeaconProposer)
-		r.TTL = c.Duration("ttl")
+
+		sk, pk, err := setupKeys(c)
+		if err != nil {
+			return err
+		}
+
+		rcfg := relay.RelayConfig{
+			TTL:       c.Duration("ttl"),
+			PubKey:    pk,
+			SecretKey: sk,
+		}
+
+		r, err := relay.NewRelay(rcfg, l, store, domainBuilder, domainBeaconProposer)
+
 		if err != nil {
 			return err
 		}
@@ -244,7 +229,7 @@ func run() cli.ActionFunc {
 				}).Info("data store initialized")
 		*/
 
-		api := api.NewApi(l, bm, r)
+		api := api.NewApi(l, memoryStore, r, cfg.CheckKnownValidator)
 		mux := http.NewServeMux()
 		api.AttachToHandler(mux)
 		l.Debug("relay service ready")
@@ -274,4 +259,19 @@ func run() cli.ActionFunc {
 		l.Info("http server listening")
 		return svr.ListenAndServe()
 	}
+}
+
+func setupKeys(c *cli.Context) (*blst.SecretKey, types.PublicKey, error) {
+	skBytes, err := hexutil.Decode(c.String("secretKey"))
+	if err != nil {
+		return nil, types.PublicKey{}, err
+	}
+	sk, err := bls.SecretKeyFromBytes(skBytes[:])
+	if err != nil {
+		return nil, types.PublicKey{}, err
+	}
+
+	var pk types.PublicKey
+	err = pk.FromSlice(bls.PublicKeyFromSecretKey(sk).Compress())
+	return sk, pk, err
 }

@@ -51,13 +51,12 @@ var (
 
 type Relay interface {
 	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
-	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
+	RegisterValidator(ctx context.Context, headSlot structs.Slot, payload []structs.CheckedSignedValidatorRegistration) error
 	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
 	GetPayload(context.Context, types.PublicKey, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
 
 	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
 	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
-	GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry
 
 	// Data APIs
 	GetPayloadDelivered(context.Context, structs.Slot, structs.TraceQuery) ([]structs.BidTraceExtended, error)
@@ -76,14 +75,15 @@ type API struct {
 	relay  Relay
 	bstate BeaconState
 	l      log.Logger
+
+	checkKnownValidator bool
 }
 
-func NewApi(l log.Logger, bstate BeaconState, relay Relay) (a *API) {
-	return &API{l: l, bstate: bstate, relay: relay}
+func NewApi(l log.Logger, bstate BeaconState, relay Relay, checkKnownValidator bool) (a *API) {
+	return &API{l: l, bstate: bstate, relay: relay, checkKnownValidator: checkKnownValidator}
 }
 
 func (a *API) AttachToHandler(m *http.ServeMux) {
-
 	router := mux.NewRouter()
 	router.Use(
 		withDrainBody(),
@@ -112,10 +112,6 @@ func (a *API) AttachToHandler(m *http.ServeMux) {
 	router.Use(mux.CORSMethodMiddleware(router))
 	m.Handle("/", router)
 }
-
-//func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-//	a.mux.ServeHTTP(w, r)
-//}
 
 func handler(f func(http.ResponseWriter, *http.Request) (int, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -146,12 +142,31 @@ func succeed(status int) http.HandlerFunc {
 
 // proposer related handlers
 func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status int, err error) {
-	payload := []types.SignedValidatorRegistration{}
+	payload := []structs.CheckedSignedValidatorRegistration{}
 	if err = json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		return http.StatusBadRequest, errors.New("invalid payload")
 	}
 
-	err = a.relay.RegisterValidator(r.Context(), payload)
+	hs := a.bstate.HeadSlot()
+	for _, registerRequest := range payload {
+		pk := structs.PubKey{registerRequest.Message.Pubkey}
+		ok, err := a.bstate.IsKnownValidator(pk.PubkeyHex()) // we can create batch check request here
+		if err != nil {
+			return http.StatusBadRequest, err
+		} else if !ok {
+			if a.checkKnownValidator {
+				return http.StatusBadRequest, fmt.Errorf("%s not a known validator", registerRequest.Message.Pubkey.String())
+			}
+			a.l.
+				WithField("pubkey", pk.PublicKey).
+				WithField("slot", hs).
+				Debug("not a known validator")
+
+		}
+		registerRequest.VerifiedPublicKey = true
+
+	}
+	err = a.relay.RegisterValidator(r.Context(), hs, payload)
 	if err != nil {
 		status = http.StatusBadRequest
 	}

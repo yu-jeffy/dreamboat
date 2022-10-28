@@ -35,19 +35,19 @@ func TestPutGetHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	// get
-	gotHeader, err := ds.GetHeaders(ctx, Query{Slot: slot})
+	gotHeader, err := ds.GetHeaders(ctx, structs.TraceQuery{Slot: slot})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 	require.EqualValues(t, *header.Header, *gotHeader[0].Header)
 
 	// get by block hash
-	gotHeader, err = ds.GetHeaders(ctx, Query{BlockHash: header.Header.BlockHash})
+	gotHeader, err = ds.GetHeaders(ctx, structs.TraceQuery{BlockHash: header.Header.BlockHash})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 	require.EqualValues(t, *header.Header, *gotHeader[0].Header)
 
 	// get by block number
-	gotHeader, err = ds.GetHeaders(ctx, Query{BlockNum: header.Header.BlockNumber})
+	gotHeader, err = ds.GetHeaders(ctx, structs.TraceQuery{BlockNum: header.Header.BlockNumber})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 	require.EqualValues(t, *header.Header, *gotHeader[0].Header)
@@ -73,7 +73,7 @@ func TestPutGetHeaderDuplicate(t *testing.T) {
 	}
 
 	// get
-	gotHeaders, err := ds.GetHeaders(ctx, Query{Slot: slot})
+	gotHeaders, err := ds.GetHeaders(ctx, structs.TraceQuery{Slot: slot})
 	require.NoError(t, err)
 	require.Len(t, gotHeaders, 1)
 	require.EqualValues(t, header.Trace.Value, gotHeaders[0].Trace.Value)
@@ -114,19 +114,19 @@ func TestPutGetHeaders(t *testing.T) {
 		header := headers[i]
 
 		// get
-		gotHeader, err := ds.GetHeaders(ctx, Query{Slot: slot})
+		gotHeader, err := ds.GetHeaders(ctx, structs.TraceQuery{Slot: slot})
 		require.NoError(t, err)
 		require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 		require.EqualValues(t, *header.Header, *gotHeader[0].Header)
 
 		// get by block hash
-		gotHeader, err = ds.GetHeaders(ctx, Query{BlockHash: header.Header.BlockHash})
+		gotHeader, err = ds.GetHeaders(ctx, structs.TraceQuery{BlockHash: header.Header.BlockHash})
 		require.NoError(t, err)
 		require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 		require.EqualValues(t, *header.Header, *gotHeader[0].Header)
 
 		// get by block number
-		gotHeader, err = ds.GetHeaders(ctx, Query{BlockNum: header.Header.BlockNumber})
+		gotHeader, err = ds.GetHeaders(ctx, structs.TraceQuery{BlockNum: header.Header.BlockNumber})
 		require.NoError(t, err)
 		require.EqualValues(t, header.Trace.Value, gotHeader[0].Trace.Value)
 		require.EqualValues(t, *header.Header, *gotHeader[0].Header)
@@ -149,18 +149,18 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	require.NoError(t, err)
 
 	// get
-	_, err = d.GetDelivered(ctx, Query{Slot: slot})
+	_, err = d.GetDelivered(ctx, structs.TraceQuery{Slot: slot})
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
 	// get by block hash
-	_, err = d.GetDelivered(ctx, Query{BlockHash: header.Trace.BlockHash})
+	_, err = d.GetDelivered(ctx, structs.TraceQuery{BlockHash: header.Trace.BlockHash})
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
 	// get by block number
-	_, err = d.GetDelivered(ctx, Query{BlockNum: header.Header.BlockNumber})
+	_, err = d.GetDelivered(ctx, structs.TraceQuery{BlockNum: header.Header.BlockNumber})
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
-	_, err = d.GetDelivered(ctx, Query{PubKey: header.Trace.ProposerPubkey})
+	_, err = d.GetDelivered(ctx, structs.TraceQuery{Pubkey: header.Trace.ProposerPubkey})
 	require.ErrorIs(t, err, ds.ErrNotFound)
 
 	// set as delivered and retrieve again
@@ -168,21 +168,21 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	require.NoError(t, err)
 
 	// get
-	gotHeader, err := d.GetDelivered(ctx, Query{Slot: slot})
+	gotHeader, err := d.GetDelivered(ctx, structs.TraceQuery{Slot: slot})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader.BidTrace.Value)
 
 	// get by block hash
-	gotHeader, err = d.GetDelivered(ctx, Query{BlockHash: header.Trace.BlockHash})
+	gotHeader, err = d.GetDelivered(ctx, structs.TraceQuery{BlockHash: header.Trace.BlockHash})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader.BidTrace.Value)
 
 	// get by block number
-	gotHeader, err = d.GetDelivered(ctx, Query{BlockNum: header.Header.BlockNumber})
+	gotHeader, err = d.GetDelivered(ctx, structs.TraceQuery{BlockNum: header.Header.BlockNumber})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader.BidTrace.Value)
 
-	gotHeader, err = d.GetDelivered(ctx, Query{PubKey: header.Trace.ProposerPubkey})
+	gotHeader, err = d.GetDelivered(ctx, structs.TraceQuery{Pubkey: header.Trace.ProposerPubkey})
 	require.NoError(t, err)
 	require.EqualValues(t, header.Trace.Value, gotHeader.BidTrace.Value)
 }

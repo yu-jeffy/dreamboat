@@ -30,7 +30,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -45,7 +46,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -53,7 +55,10 @@ func TestMuxRouting(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		relay.EXPECT().
-			RegisterValidator(gomock.Any(), gomock.Any()).
+			RegisterValidator(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		bDS.EXPECT().HeadSlot().
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -63,7 +68,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -81,7 +87,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -89,7 +96,10 @@ func TestMuxRouting(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		relay.EXPECT().
-			GetPayload(gomock.Any(), gomock.Any()).
+			GetPayload(gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(1)
+
+		bDS.EXPECT().HeadSlot().
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -99,7 +109,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 		req := httptest.NewRequest(http.MethodPost, PathSubmitBlock, nil)
@@ -116,17 +127,16 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
 		req := httptest.NewRequest(http.MethodGet, PathGetValidators, nil)
 		w := httptest.NewRecorder()
 
-		relay.EXPECT().
-			GetValidators(gomock.Any()).
+		bDS.EXPECT().ValidatorsMap().
 			Times(1)
-
 		mux.ServeHTTP(w, req)
 	})
 
@@ -134,7 +144,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -145,8 +156,11 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
+
 		relay.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
+			GetBlockReceived(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -155,7 +169,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -168,8 +183,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
+			GetBlockReceived(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -178,7 +195,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -190,8 +208,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
+			GetBlockReceived(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -200,7 +220,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -212,8 +233,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: 50}).
+			GetBlockReceived(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: 50}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -222,7 +245,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -233,8 +257,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetBlockReceived(gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
+			GetBlockReceived(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -244,7 +270,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -255,8 +282,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, Slot: 100}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -265,7 +294,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -278,8 +308,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockHash: blockHash}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -289,7 +321,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -301,8 +334,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, BlockNum: 100}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -311,7 +346,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -323,8 +359,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit, Cursor: 50}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit, Cursor: 50}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -333,7 +371,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -345,8 +384,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: 50}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: 50}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -355,7 +396,8 @@ func TestMuxRouting(t *testing.T) {
 		t.Parallel()
 
 		relay := mocks.NewMockRelay(ctrl)
-		a := NewApi(logger, relay)
+		bDS := mocks.NewMockBeaconState(ctrl)
+		a := NewApi(logger, bDS, relay, true)
 		mux := http.NewServeMux()
 		a.AttachToHandler(mux)
 
@@ -366,8 +408,10 @@ func TestMuxRouting(t *testing.T) {
 
 		w := httptest.NewRecorder()
 
+		bDS.EXPECT().HeadSlot().
+			Times(1)
 		relay.EXPECT().
-			GetPayloadDelivered(gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
+			GetPayloadDelivered(gomock.Any(), gomock.Any(), structs.TraceQuery{Limit: DataLimit}).
 			Times(1)
 
 		mux.ServeHTTP(w, req)
@@ -388,14 +432,14 @@ func BenchmarkAPISequential(b *testing.B) {
 	defer ctrl.Finish()
 
 	relay := mocks.NewMockRelay(ctrl)
-	a := NewApi(logger, relay)
+	bDS := mocks.NewMockBeaconState(ctrl)
+	a := NewApi(logger, bDS, relay, true)
 	mux := http.NewServeMux()
 	a.AttachToHandler(mux)
 
 	relay.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
-	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
-	relay.EXPECT().GetValidators(gomock.Any()).AnyTimes()
-	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	relay.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
 
 	w := httptest.NewRecorder()
@@ -416,14 +460,14 @@ func BenchmarkAPIParallel(b *testing.B) {
 	defer wg.Wait()
 
 	relay := mocks.NewMockRelay(ctrl)
-	a := NewApi(logger, relay)
+	bDS := mocks.NewMockBeaconState(ctrl)
+	a := NewApi(logger, bDS, relay, true)
 	mux := http.NewServeMux()
 	a.AttachToHandler(mux)
 
 	relay.EXPECT().GetHeader(gomock.Any(), gomock.Any()).AnyTimes()
-	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any()).AnyTimes()
-	relay.EXPECT().GetValidators(gomock.Any()).AnyTimes()
-	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().GetPayload(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	relay.EXPECT().RegisterValidator(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	relay.EXPECT().SubmitBlock(gomock.Any(), gomock.Any()).AnyTimes()
 
 	randReqs := make([]*http.Request, 0)

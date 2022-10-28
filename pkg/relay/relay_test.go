@@ -2,8 +2,6 @@ package relay
 
 import (
 	"context"
-	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,10 +23,9 @@ func TestRegisterValidator(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 
-	config := relay.Config{Log: log.New(), Network: "ropsten", TTL: time.Minute}
-	r, _ := relay.NewRelay(config)
-	ds := &relay.DefaultDatastore{TTLStorage: newMockDatastore()}
-	bc := mock_relay.NewMockBeaconState(ctrl)
+	config := RelayConfig{TTL: time.Minute}
+	r, _ := NewRelay(config, log.New())
+	//ds := &relay.DefaultDatastore{TTLStorage: newMockDatastore()}
 
 	relaySigningDomain, err := relay.ComputeDomain(
 		types.DomainTypeAppBuilder,
@@ -37,16 +34,14 @@ func TestRegisterValidator(t *testing.T) {
 	require.NoError(t, err)
 
 	knownValidators := make(map[types.PubkeyHex]struct{}, N)
-	registrations := make([]types.SignedValidatorRegistration, 0, N)
+	registrations := make([]structs.CheckedSignedValidatorRegistration, 0, N)
 	for i := 0; i < N; i++ {
 		registration, _ := validValidatorRegistration(t, relaySigningDomain)
 		registrations = append(registrations, *registration)
 		knownValidators[registration.Message.Pubkey.PubkeyHex()] = struct{}{}
 	}
 
-	bc.EXPECT().IsKnownValidator(gomock.Any()).Return(true, nil).Times(N)
-
-	err = r.RegisterValidator(ctx, registrations, state{ds: ds, bc: bc})
+	err = r.RegisterValidator(ctx, hc, registrations)
 	require.NoError(t, err)
 
 	for _, registration := range registrations {
@@ -58,6 +53,29 @@ func TestRegisterValidator(t *testing.T) {
 
 }
 
+func validValidatorRegistration(t require.TestingT, domain types.Domain) (*types.SignedValidatorRegistration, *bls.SecretKey) {
+	sk, pk, err := bls.GenerateNewKeypair()
+	require.NoError(t, err)
+
+	var pubKey types.PublicKey
+	pubKey.FromSlice(pk.Compress())
+
+	msg := &types.RegisterValidatorRequestMessage{
+		FeeRecipient: types.Address{0x42},
+		GasLimit:     15_000_000,
+		Timestamp:    1652369368,
+		Pubkey:       pubKey,
+	}
+
+	signature, err := types.SignMessage(msg, domain, sk)
+	require.NoError(t, err)
+	return &types.SignedValidatorRegistration{
+		Message:   msg,
+		Signature: signature,
+	}, sk
+}
+
+/*
 func TestGetHeader(t *testing.T) {
 	t.Parallel()
 
@@ -919,3 +937,4 @@ func TestServiceRouting(t *testing.T) {
 		service.GetValidators()
 	})
 }
+*/

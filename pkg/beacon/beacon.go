@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/lthibault/log"
+)
+
+var (
+	ErrBeaconNodeSyncing = errors.New("beacon node is syncing")
 )
 
 type BeaconClient interface {
@@ -39,8 +41,8 @@ type BeaconManager struct {
 	memoryStore BeaconState
 }
 
-func NewBeaconManager(l log.Logger, client BeaconClient) *BeaconManager {
-	return &BeaconManager{l: l, client: client}
+func NewBeaconManager(l log.Logger, memoryStore BeaconState, client BeaconClient) *BeaconManager {
+	return &BeaconManager{l: l, memoryStore: memoryStore, client: client}
 }
 
 func (bm *BeaconManager) BeaconEventLoop(ctx context.Context) error {
@@ -62,13 +64,24 @@ func (bm *BeaconManager) BeaconEventLoop(ctx context.Context) error {
 	events := make(chan structs.HeadEvent)
 
 	go bm.client.SubscribeToHeadEvents(ctx, events)
-
+	var headslotSlot structs.Slot
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case ev := <-events:
-			if err := bm.processNewSlot(ctx, ev); err != nil {
+			recvSlot := structs.Slot(ev.Slot)
+			if recvSlot <= headslotSlot {
+				continue
+			}
+
+			if headslotSlot > 0 {
+				for slot := headslotSlot + 1; slot < recvSlot; slot++ {
+					bm.l.Warnf("missedSlot %d", slot)
+				}
+			}
+
+			if err := bm.processNewSlot(ctx, (DurationPerEpoch / 2), recvSlot); err != nil {
 				bm.l.
 					With(ev).
 					WithError(err).
@@ -79,22 +92,10 @@ func (bm *BeaconManager) BeaconEventLoop(ctx context.Context) error {
 	}
 }
 
-func (bm *BeaconManager) processNewSlot(ctx context.Context, event structs.HeadEvent) error {
+func (bm *BeaconManager) processNewSlot(ctx context.Context, updateProposerDuration time.Duration, received structs.Slot) error {
+
 	logger := bm.l.WithField("method", "ProcessNewSlot")
 	timeStart := time.Now()
-
-	received := structs.Slot(event.Slot)
-	if received <= bm.headslotSlot {
-		return nil
-	}
-
-	if bm.headslotSlot > 0 {
-		for slot := bm.headslotSlot + 1; slot < received; slot++ {
-			bm.l.Warnf("missedSlot %d", slot)
-		}
-	}
-
-	//bm.headslotSlot = received
 
 	logger.With(log.F{
 		"epoch":              received.Epoch(),
@@ -104,7 +105,7 @@ func (bm *BeaconManager) processNewSlot(ctx context.Context, event structs.HeadE
 	).Debugf("updated headSlot to %d", received)
 
 	// update proposer duties and known validators in the background
-	if (DurationPerEpoch / 2) < time.Since(bm.memoryStore.UpdateTime()) { // only update every half DurationPerEpoch
+	if updateProposerDuration < time.Since(bm.memoryStore.UpdateTime()) { // only update every half DurationPerEpoch
 		go func() {
 			if err := bm.updateKnownValidators(ctx, received); err != nil {
 				bm.l.WithError(err).Warn("failed to update known validators")
@@ -221,153 +222,3 @@ func (bm *BeaconManager) updateKnownValidators(ctx context.Context, current stru
 
 	return nil
 }
-
-type BeaconMemstore struct {
-	headSlot uint64
-
-	updateTimeUnix int64
-
-	proposerDutiesResponse []types.BuilderGetValidatorsResponseEntry
-
-	knownValidatorsByIndex map[uint64]types.PubkeyHex
-	knownValidators        map[types.PubkeyHex]struct{}
-	kvMutex                sync.RWMutex
-}
-
-func NewBeaconMemstore() *BeaconMemstore {
-	return &BeaconMemstore{}
-}
-
-func (bms *BeaconMemstore) SetKnownValidator(pubkey types.PubkeyHex, index uint64) {
-	bms.kvMutex.Lock()
-	defer bms.kvMutex.Unlock()
-	bms.knownValidatorsByIndex[index] = pubkey
-	bms.knownValidators[pubkey] = struct{}{}
-}
-
-func (bms *BeaconMemstore) ResetKnownValidators(pubkey types.PubkeyHex, index uint64) {
-	bms.kvMutex.Lock()
-	defer bms.kvMutex.Unlock()
-	bms.knownValidatorsByIndex[index] = pubkey
-	bms.knownValidators[pubkey] = struct{}{}
-}
-
-func (bms *BeaconMemstore) KnownValidatorByIndex(index uint64) types.PubkeyHex {
-	bms.kvMutex.RLock()
-	defer bms.kvMutex.RUnlock()
-	return bms.knownValidatorsByIndex[index]
-}
-
-func (bms *BeaconMemstore) IsKnownValidator(pk types.PubkeyHex) bool {
-	bms.kvMutex.RLock()
-	defer bms.kvMutex.RUnlock()
-	_, ok := bms.knownValidators[pk]
-	return ok
-}
-
-func (bms *BeaconMemstore) SetHeadSlot(sl structs.Slot) {
-	atomic.StoreUint64(&bms.headSlot, uint64(sl))
-}
-
-func (bms *BeaconMemstore) SetUpdateTime(unixTime int64) {
-	atomic.StoreInt64(&bms.updateTimeUnix, unixTime)
-}
-
-func (bms *BeaconMemstore) UpdateTime() time.Time {
-	return time.Unix(bms.updateTimeUnix, 0)
-}
-
-func (bms *BeaconMemstore) HeadSlot() structs.Slot {
-	return structs.Slot(bms.headSlot)
-}
-
-func (bms *BeaconMemstore) ValidatorsMap() []types.BuilderGetValidatorsResponseEntry {
-	//return
-}
-
-/*
-
-type DefaultService struct {
-	Log log.Logger
-
-	NewBeaconClient func() (BeaconClient, error)
-
-	once  sync.Once
-	ready chan struct{}
-
-	// state
-	state        atomicState
-	headslotSlot structs.Slot
-	updateTime   atomic.Value
-}
-
-
-func (s *DefaultService) Ready() <-chan struct{} {
-	s.once.Do(func() {
-		s.ready = make(chan struct{})
-	})
-	return s.ready
-}
-
-func (s *DefaultService) setReady() {
-	select {
-	case <-s.Ready():
-	default:
-		close(s.ready)
-	}
-*/
-
-/*
-
-type atomicState struct {
-	duties     atomic.Value
-	validators atomic.Value
-}
-
-func (as *atomicState) Beacon() BeaconState {
-	duties := as.duties.Load().(dutiesState)
-	validators := as.validators.Load().(validatorsState)
-	return beaconState{dutiesState: duties, validatorsState: validators}
-}
-
-type beaconState struct {
-	dutiesState
-	validatorsState
-}
-
-func (s beaconState) KnownValidatorByIndex(index uint64) (types.PubkeyHex, error) {
-	pk, ok := s.knownValidatorsByIndex[index]
-	if !ok {
-		return "", ErrUnknownValue
-	}
-	return pk, nil
-}
-
-func (s beaconState) IsKnownValidator(pk types.PubkeyHex) (bool, error) {
-	_, ok := s.knownValidators[pk]
-	return ok, nil
-}
-
-func (s beaconState) KnownValidators() map[types.PubkeyHex]struct{} {
-	return s.knownValidators
-}
-
-func (s beaconState) HeadSlot() structs.Slot {
-	return s.currentSlot
-}
-
-func (s beaconState) ValidatorsMap() []types.BuilderGetValidatorsResponseEntry {
-	return s.proposerDutiesResponse
-}
-
-type dutiesState struct {
-	currentSlot            structs.Slot
-	proposerDutiesResponse []types.BuilderGetValidatorsResponseEntry
-}
-
-type validatorsState struct {
-	knownValidatorsByIndex map[uint64]types.PubkeyHex
-	knownValidators        map[types.PubkeyHex]struct{}
-}
-
-*/

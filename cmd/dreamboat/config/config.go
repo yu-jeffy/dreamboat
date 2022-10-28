@@ -47,6 +47,8 @@ type Config struct {
 	GenesisForkVersion    string
 	GenesisValidatorsRoot string
 	BellatrixForkVersion  string
+
+	CheckKnownValidator bool
 }
 
 func NewConfig() Config {

@@ -1,4 +1,5 @@
-//go:generate mockgen -source=relay.go -destination=../internal/mock/pkg/relay.go -package=mock_relay
+//go:generate mockgen  -destination=./mocks/datastore.go -package=mocks github.com/blocknative/dreamboat/pkg/relay RelayDatastore
+
 package relay
 
 import (
@@ -32,9 +33,11 @@ const (
 
 type RelayDatastore interface {
 	PutHeader(context.Context, structs.Slot, structs.HeaderAndTrace, time.Duration) error
+	GetHeaders(ctx context.Context, query structs.TraceQuery) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlot(context.Context, structs.Slot) ([]structs.HeaderAndTrace, error)
 	GetHeadersBySlots(context.Context, []structs.Slot) ([]structs.HeaderAndTrace, error)
 	PutDelivered(context.Context, structs.Slot, structs.DeliveredTrace, time.Duration) error
+	GetDelivered(ctx context.Context, query structs.TraceQuery) (structs.BidTraceWithTimestamp, error)
 	GetDeliveredBySlot(context.Context, structs.Slot) (structs.BidTraceWithTimestamp, error)
 	GetDeliveredBySlots(context.Context, []structs.Slot) ([]structs.BidTraceWithTimestamp, error)
 	PutPayload(context.Context, ds.Key, *structs.BlockBidAndTrace, time.Duration) error
@@ -44,10 +47,9 @@ type RelayDatastore interface {
 }
 
 type RelayConfig struct {
-	TTL                 time.Duration
-	PubKey              types.PublicKey
-	SecretKey           *bls.SecretKey
-	CheckKnownValidator bool
+	TTL       time.Duration
+	PubKey    types.PublicKey
+	SecretKey *bls.SecretKey
 }
 
 type Relay struct {
@@ -79,9 +81,8 @@ func verifyTimestamp(timestamp uint64) bool {
 }
 
 // ***** Builder Domain *****
-
 // RegisterValidator is called is called by validators communicating through mev-boost who would like to receive a block from us when their slot is scheduled
-func (rs *Relay) RegisterValidator(ctx context.Context, headSlot structs.Slot, payload []types.SignedValidatorRegistration) error {
+func (rs *Relay) RegisterValidator(ctx context.Context, headSlot structs.Slot, payload []structs.CheckedSignedValidatorRegistration) error {
 	logger := rs.l.WithField("method", "RegisterValidator")
 	timeStart := time.Now()
 
@@ -112,7 +113,7 @@ func (rs *Relay) RegisterValidator(ctx context.Context, headSlot structs.Slot, p
 	return nil
 }
 
-func (rs *Relay) processValidator(ctx context.Context, headslot structs.Slot, payload []types.SignedValidatorRegistration) error {
+func (rs *Relay) processValidator(ctx context.Context, headslot structs.Slot, payload []structs.CheckedSignedValidatorRegistration) error {
 	logger := rs.l.WithField("method", "RegisterValidator")
 	timeStart := time.Now()
 
@@ -135,24 +136,24 @@ func (rs *Relay) processValidator(ctx context.Context, headslot structs.Slot, pa
 		if verifyTimestamp(registerRequest.Message.Timestamp) {
 			return fmt.Errorf("request too far in future for %s", registerRequest.Message.Pubkey.String())
 		}
+		/*
+			pk := structs.PubKey{registerRequest.Message.Pubkey}
+			ok, err = rs.bstate.IsKnownValidator(pk.PubkeyHex()) // TODO(l): to be moved upwards
+			if err != nil {
+				return err
+			} else if !ok {
+				if rs.config.CheckKnownValidator {
+					return fmt.Errorf("%s not a known validator", registerRequest.Message.Pubkey.String())
+				}
+				logger.
+					WithField("pubkey", pk.PublicKey).
+					WithField("slot", headslot).
+					Debug("not a known validator")
 
-		pk := structs.PubKey{registerRequest.Message.Pubkey}
-
-		ok, err = rs.bstate.IsKnownValidator(pk.PubkeyHex())
-		if err != nil {
-			return err
-		} else if !ok {
-			if rs.config.CheckKnownValidator {
-				return fmt.Errorf("%s not a known validator", registerRequest.Message.Pubkey.String())
 			}
-			logger.
-				WithField("pubkey", pk.PublicKey).
-				WithField("slot", headslot).
-				Debug("not a known validator")
-
-		}
-
+		*/
 		// check previous validator registration
+		pk := structs.PubKey{registerRequest.Message.Pubkey}
 		previousValidator, err := rs.store.GetRegistration(ctx, pk)
 		if err != nil && !errors.Is(err, ds.ErrNotFound) {
 			logger.Warn(err)
@@ -180,7 +181,7 @@ func (rs *Relay) processValidator(ctx context.Context, headslot structs.Slot, pa
 		}
 
 		// officially register validator
-		if err := rs.store.PutRegistration(ctx, pk, registerRequest, rs.config.TTL); err != nil {
+		if err := rs.store.PutRegistration(ctx, pk, registerRequest.SignedValidatorRegistration, rs.config.TTL); err != nil {
 			logger.WithField("pubkey", registerRequest.Message.Pubkey).WithError(err).Debug("Error in PutRegistration")
 			return fmt.Errorf("failed to store %s", registerRequest.Message.Pubkey.String())
 		}
@@ -484,11 +485,11 @@ func (rs *Relay) GetPayloadDelivered(ctx context.Context, headSlot structs.Slot,
 	if query.HasSlot() {
 		event, err = rs.store.GetDeliveredBySlot(ctx, query.Slot)
 	} else if query.HasBlockHash() {
-		event, err = rs.store.GetDelivered(ctx, Query{BlockHash: query.BlockHash})
+		event, err = rs.store.GetDelivered(ctx, structs.TraceQuery{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
-		event, err = rs.store.GetDelivered(ctx, Query{BlockNum: query.BlockNum})
+		event, err = rs.store.GetDelivered(ctx, structs.TraceQuery{BlockNum: query.BlockNum})
 	} else if query.HasPubkey() {
-		event, err = rs.store.GetDelivered(ctx, Query{PubKey: query.Pubkey})
+		event, err = rs.store.GetDelivered(ctx, structs.TraceQuery{Pubkey: query.Pubkey})
 	} else {
 		return rs.getTailDelivered(ctx, headSlot, query.Limit, query.Cursor, rs.config.TTL)
 	}
@@ -559,9 +560,9 @@ func (rs *Relay) GetBlockReceived(ctx context.Context, headSlot structs.Slot, qu
 	if query.HasSlot() {
 		events, err = rs.store.GetHeadersBySlot(ctx, query.Slot)
 	} else if query.HasBlockHash() {
-		events, err = rs.store.GetHeaders(ctx, Query{BlockHash: query.BlockHash})
+		events, err = rs.store.GetHeaders(ctx, structs.TraceQuery{BlockHash: query.BlockHash})
 	} else if query.HasBlockNum() {
-		events, err = rs.store.GetHeaders(ctx, Query{BlockNum: query.BlockNum})
+		events, err = rs.store.GetHeaders(ctx, structs.TraceQuery{BlockNum: query.BlockNum})
 	} else {
 		return rs.getTailBlockReceived(ctx, headSlot, query.Limit, rs.config.TTL)
 	}
