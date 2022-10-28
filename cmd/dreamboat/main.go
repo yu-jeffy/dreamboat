@@ -224,7 +224,7 @@ func run() cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		r, err := relay.NewRelay(cfg, l, store, bm, domainBuilder, domainBeaconProposer)
+		r, err := relay.NewRelay(cfg, l, store, domainBuilder, domainBeaconProposer)
 		r.TTL = c.Duration("ttl")
 		if err != nil {
 			return err
@@ -244,7 +244,7 @@ func run() cli.ActionFunc {
 				}).Info("data store initialized")
 		*/
 
-		api := api.NewApi(l, r)
+		api := api.NewApi(l, bm, r)
 		mux := http.NewServeMux()
 		api.AttachToHandler(mux)
 		l.Debug("relay service ready")

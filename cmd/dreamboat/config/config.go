@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
-	"github.com/flashbots/go-boost-utils/bls"
-	"github.com/flashbots/go-boost-utils/types"
 	"github.com/lthibault/log"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -42,11 +40,7 @@ type Config struct {
 	RelayRequestTimeout time.Duration
 	BuilderCheck        bool
 	BeaconEndpoints     []string
-	PubKey              types.PublicKey
-	SecretKey           *bls.SecretKey
 	Datadir             string
-	//TTL                 time.Duration
-	CheckKnownValidator bool
 
 	// private fields; populated during validation
 	Builders              map[structs.PubKey]*builder

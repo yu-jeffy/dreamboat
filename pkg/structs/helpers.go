@@ -12,6 +12,7 @@ import (
 var (
 	ErrMissingRequest   = errors.New("req is nil")
 	ErrMissingSecretKey = errors.New("secret key is nil")
+	ErrUnknownValue     = errors.New("value is unknown")
 )
 
 // ComputeDomain computes the signing domain

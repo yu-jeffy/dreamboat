@@ -1,4 +1,4 @@
-//go:generate mockgen  -destination=./mocks/relay.go -package=mocks github.com/blocknative/dreamboat/pkg/api Relay
+//go:generate mockgen  -destination=./mocks/relay.go -package=mocks github.com/blocknative/dreamboat/pkg/api Relay,BeaconState
 
 package api
 
@@ -53,25 +53,33 @@ type Relay interface {
 	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
 	RegisterValidator(context.Context, []types.SignedValidatorRegistration) error
 	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
-	GetPayload(context.Context, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
+	GetPayload(context.Context, types.PublicKey, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
 
 	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
 	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
 	GetValidators(context.Context) []types.BuilderGetValidatorsResponseEntry
 
 	// Data APIs
-	GetPayloadDelivered(context.Context, structs.TraceQuery) ([]structs.BidTraceExtended, error)
-	GetBlockReceived(context.Context, structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error)
+	GetPayloadDelivered(context.Context, structs.Slot, structs.TraceQuery) ([]structs.BidTraceExtended, error)
+	GetBlockReceived(context.Context, structs.Slot, structs.TraceQuery) ([]structs.BidTraceWithTimestamp, error)
 	Registration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
 }
 
-type API struct {
-	relay Relay
-	l     log.Logger
+type BeaconState interface {
+	KnownValidatorByIndex(uint64) (types.PubkeyHex, error)
+	IsKnownValidator(types.PubkeyHex) (bool, error)
+	HeadSlot() structs.Slot
+	ValidatorsMap() []types.BuilderGetValidatorsResponseEntry
 }
 
-func NewApi(l log.Logger, relay Relay) (a *API) {
-	return &API{l: l, relay: relay}
+type API struct {
+	relay  Relay
+	bstate BeaconState
+	l      log.Logger
+}
+
+func NewApi(l log.Logger, bstate BeaconState, relay Relay) (a *API) {
+	return &API{l: l, bstate: bstate, relay: relay}
 }
 
 func (a *API) AttachToHandler(m *http.ServeMux) {
@@ -173,7 +181,23 @@ func (a *API) getPayload(w http.ResponseWriter, r *http.Request) (int, error) {
 		return http.StatusBadRequest, errors.New("invalid payload")
 	}
 
-	payload, err := a.relay.GetPayload(r.Context(), &block)
+	if len(block.Signature) != 96 {
+		return http.StatusBadRequest, fmt.Errorf("invalid signature")
+	}
+
+	proposerPubkey, err := a.bstate.KnownValidatorByIndex(block.Message.ProposerIndex)
+	if err != nil && errors.Is(err, structs.ErrUnknownValue) {
+		return http.StatusBadRequest, fmt.Errorf("unknown validator for index %d", block.Message.ProposerIndex)
+	} else if err != nil {
+		return http.StatusBadRequest, err
+	}
+
+	pk, err := types.HexToPubkey(proposerPubkey.String())
+	if err != nil {
+		return http.StatusBadRequest, err
+	}
+
+	payload, err := a.relay.GetPayload(r.Context(), pk, &block)
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
@@ -204,9 +228,11 @@ func (a *API) submitBlock(w http.ResponseWriter, r *http.Request) (int, error) {
 }
 
 func (a *API) getValidators(w http.ResponseWriter, r *http.Request) (int, error) {
-	vs := a.relay.GetValidators(r.Context())
+
+	log := a.l.WithField("method", "GetValidators")
+	vs := a.bstate.ValidatorsMap()
 	if vs == nil {
-		a.l.Trace("no registered validators for epoch")
+		log.Trace("no registered validators for epoch")
 	}
 
 	if err := json.NewEncoder(w).Encode(vs); err != nil {
@@ -278,7 +304,8 @@ func (a *API) proposerPayloadsDelivered(w http.ResponseWriter, r *http.Request) 
 		Limit:     limit,
 	}
 
-	blocks, err := a.relay.GetPayloadDelivered(r.Context(), query)
+	hs := a.bstate.HeadSlot()
+	blocks, err := a.relay.GetPayloadDelivered(r.Context(), hs, query)
 	return a.respond(w, blocks, err)
 }
 
@@ -312,7 +339,8 @@ func (a *API) builderBlocksReceived(w http.ResponseWriter, r *http.Request) (int
 		Limit:     limit,
 	}
 
-	blocks, err := a.relay.GetBlockReceived(r.Context(), query)
+	hs := a.bstate.HeadSlot()
+	blocks, err := a.relay.GetBlockReceived(r.Context(), hs, query)
 	return a.respond(w, blocks, err)
 }
 
