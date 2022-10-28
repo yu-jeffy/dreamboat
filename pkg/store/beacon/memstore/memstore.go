@@ -47,10 +47,11 @@ func (bms *BeaconMemstore) ResetKnownValidators(pubkey types.PubkeyHex, index ui
 	bms.knownValidators[pubkey] = struct{}{}
 }
 
-func (bms *BeaconMemstore) KnownValidatorByIndex(index uint64) types.PubkeyHex {
+func (bms *BeaconMemstore) KnownValidatorByIndex(index uint64) (types.PubkeyHex, bool) {
 	bms.kvMutex.RLock()
 	defer bms.kvMutex.RUnlock()
-	return bms.knownValidatorsByIndex[index]
+	a, ok := bms.knownValidatorsByIndex[index]
+	return a, ok
 }
 
 func (bms *BeaconMemstore) IsKnownValidator(pk types.PubkeyHex) bool {

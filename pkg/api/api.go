@@ -65,8 +65,8 @@ type Relay interface {
 }
 
 type BeaconState interface {
-	KnownValidatorByIndex(uint64) (types.PubkeyHex, error)
-	IsKnownValidator(types.PubkeyHex) (bool, error)
+	KnownValidatorByIndex(uint64) (types.PubkeyHex, bool)
+	IsKnownValidator(types.PubkeyHex) bool
 	HeadSlot() structs.Slot
 	ValidatorsMap() []types.BuilderGetValidatorsResponseEntry
 }
@@ -150,10 +150,7 @@ func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status 
 	hs := a.bstate.HeadSlot()
 	for _, registerRequest := range payload {
 		pk := structs.PubKey{registerRequest.Message.Pubkey}
-		ok, err := a.bstate.IsKnownValidator(pk.PubkeyHex()) // we can create batch check request here
-		if err != nil {
-			return http.StatusBadRequest, err
-		} else if !ok {
+		if ok := a.bstate.IsKnownValidator(pk.PubkeyHex()); !ok { // we can create batch check request here
 			if a.checkKnownValidator {
 				return http.StatusBadRequest, fmt.Errorf("%s not a known validator", registerRequest.Message.Pubkey.String())
 			}
@@ -200,11 +197,9 @@ func (a *API) getPayload(w http.ResponseWriter, r *http.Request) (int, error) {
 		return http.StatusBadRequest, fmt.Errorf("invalid signature")
 	}
 
-	proposerPubkey, err := a.bstate.KnownValidatorByIndex(block.Message.ProposerIndex)
-	if err != nil && errors.Is(err, structs.ErrUnknownValue) {
+	proposerPubkey, ok := a.bstate.KnownValidatorByIndex(block.Message.ProposerIndex)
+	if !ok {
 		return http.StatusBadRequest, fmt.Errorf("unknown validator for index %d", block.Message.ProposerIndex)
-	} else if err != nil {
-		return http.StatusBadRequest, err
 	}
 
 	pk, err := types.HexToPubkey(proposerPubkey.String())

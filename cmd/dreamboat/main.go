@@ -170,10 +170,6 @@ func run() cli.ActionFunc {
 
 		memoryStore := memstore.NewBeaconMemstore()
 		multiBClient := beacon.NewMultiBeaconClient(l.WithField("service", "multi-beacon client"), clients)
-		/*if err != nil {
-			l.WithError(err).Warn("failed beacon client registration")
-			return err
-		}*/
 
 		l.Info("beacon client initialized")
 
@@ -238,6 +234,18 @@ func run() cli.ActionFunc {
 			IdleTimeout:    time.Second * 2,
 			MaxHeaderBytes: 4096,
 			Handler:        mux,
+		}
+
+		var i int
+		for {
+			i++
+			if memoryStore.UpdateTime().Second() > 0 {
+				break
+			}
+			if i > 200 {
+				// FATAL ERROR
+			}
+			<-time.After(time.Second)
 		}
 
 		go func(ctx context.Context, srv *http.Server) {

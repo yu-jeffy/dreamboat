@@ -31,7 +31,7 @@ type BeaconClient interface {
 }
 
 type BeaconState interface {
-	KnownValidatorByIndex(index uint64) types.PubkeyHex
+	KnownValidatorByIndex(index uint64) (types.PubkeyHex, bool)
 
 	SetHeadSlot(sl structs.Slot)
 	HeadSlot() structs.Slot
@@ -124,7 +124,6 @@ func (bm *BeaconManager) processNewSlot(ctx context.Context, updateProposerDurat
 				return
 			}
 			bm.beaconStore.SetUpdateTime(time.Now().Unix())
-			s.setReady()
 		}()
 	}
 
@@ -222,12 +221,6 @@ func (bm *BeaconManager) updateKnownValidators(ctx context.Context, current stru
 	}
 
 	bm.beaconStore.SetKnownValidators(knownValidators, knownValidatorsByIndex)
-	/*
-		state.knownValidators = knownValidators
-		state.knownValidatorsByIndex = knownValidatorsByIndex
-	*/
-	//	s.state.validators.Store(state)
-
 	logger.With(log.F{
 		"slotHead":         uint64(current),
 		"numValidators":    len(knownValidators),
