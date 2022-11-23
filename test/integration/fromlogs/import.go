@@ -26,6 +26,7 @@ type RecordPayload struct {
 	Bid         *big.Int
 	Slot        uint64
 	Blockhash   string
+	Builder     string
 }
 
 type RecordPosition struct {
@@ -37,6 +38,7 @@ type RecordPosition struct {
 	Blockhash int
 	Slot      int
 	Message   int
+	Builder   int
 }
 
 type RecordBid struct {
@@ -69,9 +71,10 @@ func parseHeader(headers []string) (rp RecordPosition, err error) {
 			rp.Blockhash = i
 		case "@slot":
 			rp.Slot = i
+		case "@builder":
+			rp.Builder = i
 		case "Message":
 			rp.Message = i
-
 		}
 	}
 
@@ -86,10 +89,39 @@ type Key struct {
 	NetworkType int
 }
 
-func parseCSV(readr io.ReadCloser) (map[Key][]RecordPayload, map[Key][]RecordBid, error) {
+type ParsedResult struct {
+	// "bid sent":
+	Bids map[Key][]RecordBid
+	// "no builder bid":
+	NoBids map[Key][]RecordBid
+	// "header requested":
+	HeaderRequested map[Key][]RecordBid
+	// "payload sent":
+	Payloads map[Key][]RecordPayload
+	// "builder block stored":
+	BuilderBlockStored map[Key][]RecordPayload
+	// "payload requested":
+	PayloadRequested map[Key][]RecordPayload
+	// "no payload found":
+	NoPayloadFound map[Key][]RecordPayload
+}
+
+func NewParsedResult() *ParsedResult {
+	return &ParsedResult{
+		Bids:               make(map[Key][]RecordBid),
+		NoBids:             make(map[Key][]RecordBid),
+		HeaderRequested:    make(map[Key][]RecordBid),
+		Payloads:           make(map[Key][]RecordPayload),
+		BuilderBlockStored: make(map[Key][]RecordPayload),
+		PayloadRequested:   make(map[Key][]RecordPayload),
+		NoPayloadFound:     make(map[Key][]RecordPayload),
+	}
+}
+
+// Query : `Service:relay AND ("payload sent" OR "bid sent" OR "builder block stored" OR "payload requested" OR "no builder bid" OR "no payload found" OR "header requested")
+func parseCSV(readr io.ReadCloser) (*ParsedResult, error) {
 	r := csv.NewReader(readr)
-	rPayloads := map[Key][]RecordPayload{}
-	rBids := map[Key][]RecordBid{}
+	pR := NewParsedResult()
 
 	var i uint
 	var rp RecordPosition
@@ -106,52 +138,125 @@ func parseCSV(readr io.ReadCloser) (map[Key][]RecordPayload, map[Key][]RecordBid
 		if i == 1 {
 			rp, err = parseHeader(record)
 			if err != nil {
-				return rPayloads, rBids, err
+				return nil, err
 			}
 			continue
 		}
 
 		switch record[rp.Message] {
+
 		case "bid sent":
 			pb, err := parseBid(record, rp)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			v, ok := rBids[Key{pb.Slot, pb.NetworkType}]
+			v, ok := pR.Bids[Key{pb.Slot, pb.NetworkType}]
 			if !ok {
 				v = []RecordBid{}
 			}
 			v = append(v, pb)
-			rBids[Key{pb.Slot, pb.NetworkType}] = v
+			pR.Bids[Key{pb.Slot, pb.NetworkType}] = v
+
+		case "no builder bid":
+			pb, err := parseBid(record, rp)
+			if err != nil {
+				return nil, err
+			}
+			v, ok := pR.NoBids[Key{pb.Slot, pb.NetworkType}]
+			if !ok {
+				v = []RecordBid{}
+			}
+			v = append(v, pb)
+			pR.NoBids[Key{pb.Slot, pb.NetworkType}] = v
+		case "header requested":
+			pb, err := parseBid(record, rp)
+			if err != nil {
+				return nil, err
+			}
+			v, ok := pR.HeaderRequested[Key{pb.Slot, pb.NetworkType}]
+			if !ok {
+				v = []RecordBid{}
+			}
+			v = append(v, pb)
+			pR.HeaderRequested[Key{pb.Slot, pb.NetworkType}] = v
+		case "builder block stored":
+			pb, err := parsePayload(record, rp)
+			if err != nil {
+				return nil, err
+			}
+			v, ok := pR.BuilderBlockStored[Key{pb.Slot, pb.NetworkType}]
+			if !ok {
+				v = []RecordPayload{}
+			}
+			v = append(v, pb)
+			pR.BuilderBlockStored[Key{pb.Slot, pb.NetworkType}] = v
 		case "payload sent":
 			pp, err := parsePayload(record, rp)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
-			v, ok := rPayloads[Key{pp.Slot, pp.NetworkType}]
+			v, ok := pR.Payloads[Key{pp.Slot, pp.NetworkType}]
 			if !ok {
 				v = []RecordPayload{}
 			}
 			v = append(v, pp)
-			rPayloads[Key{pp.Slot, pp.NetworkType}] = v
+			pR.Payloads[Key{pp.Slot, pp.NetworkType}] = v
+
+		case "no payload found":
+			pp, err := parsePayload(record, rp)
+			if err != nil {
+				return nil, err
+			}
+
+			v, ok := pR.NoPayloadFound[Key{pp.Slot, pp.NetworkType}]
+			if !ok {
+				v = []RecordPayload{}
+			}
+			v = append(v, pp)
+			pR.NoPayloadFound[Key{pp.Slot, pp.NetworkType}] = v
+
+		case "payload requested":
+			pp, err := parsePayload(record, rp)
+			if err != nil {
+				return nil, err
+			}
+
+			v, ok := pR.PayloadRequested[Key{pp.Slot, pp.NetworkType}]
+			if !ok {
+				v = []RecordPayload{}
+			}
+			v = append(v, pp)
+			pR.PayloadRequested[Key{pp.Slot, pp.NetworkType}] = v
 		default:
 			// skip others
 		}
 	}
 
-	for _, v := range rPayloads {
-		sort.Slice(v, func(i, j int) bool {
-			return v[i].Time.After(v[j].Time)
-		})
-	}
+	sortPayloads(pR.BuilderBlockStored)
+	sortPayloads(pR.Payloads)
+	sortPayloads(pR.NoPayloadFound)
+	sortPayloads(pR.PayloadRequested)
 
-	for _, v := range rBids {
+	sortBids(pR.Bids)
+	sortBids(pR.NoBids)
+
+	return pR, nil
+}
+
+func sortPayloads(p map[Key][]RecordPayload) {
+	for _, v := range p {
 		sort.Slice(v, func(i, j int) bool {
-			return v[i].Time.After(v[j].Time)
+			return v[i].Time.UnixMicro() > v[j].Time.UnixMicro()
 		})
 	}
-	return rPayloads, rBids, nil
+}
+func sortBids(p map[Key][]RecordBid) {
+	for _, v := range p {
+		sort.Slice(v, func(i, j int) bool {
+			return v[i].Time.UnixMicro() > v[j].Time.UnixMicro()
+		})
+	}
 }
 
 func parsePayload(record []string, rp RecordPosition) (rPay RecordPayload, err error) {
@@ -179,15 +284,31 @@ func parsePayload(record []string, rp RecordPosition) (rPay RecordPayload, err e
 		return rPay, fmt.Errorf("error parsing slot: %+v", record[rp.Slot])
 	}
 
-	a, ok := big.NewInt(0).SetString(strings.ReplaceAll(record[rp.Bid], `"`, ""), 10)
-	if !ok {
-		return rPay, fmt.Errorf("error parsing bid: %+v", record[rp.Bid])
+	var a *big.Int
+	if record[rp.Bid] != "" {
+		var ok bool
+		a, ok = big.NewInt(0).SetString(strings.ReplaceAll(record[rp.Bid], `"`, ""), 10)
+		if !ok {
+			return rPay, fmt.Errorf("error parsing bid: %+v", record[rp.Bid])
+		}
 	}
+
+	var b string
+	if record[rp.Builder] != "" {
+		b = strings.ReplaceAll(record[rp.Builder], `"`, "")
+	}
+
+	var blockhash string
+	if record[rp.Blockhash] != "" {
+		blockhash = strings.ReplaceAll(record[rp.Blockhash], `"`, "")
+	}
+
 	return RecordPayload{
 		NetworkType: networkType,
 		Time:        time,
 		Slot:        slot,
-		Blockhash:   strings.ReplaceAll(record[rp.Blockhash], `"`, ""),
+		Builder:     b,
+		Blockhash:   blockhash,
 		Bid:         a,
 	}, nil
 }
@@ -217,15 +338,27 @@ func parseBid(record []string, rp RecordPosition) (rBid RecordBid, err error) {
 		return rBid, fmt.Errorf("error parsing slot: %+v", record[rp.Slot])
 	}
 
-	a, ok := big.NewInt(0).SetString(strings.ReplaceAll(record[rp.BidValue], `"`, ""), 10)
-	if !ok {
-		return rBid, fmt.Errorf("error parsing bid: %+v", record[rp.BidValue])
+	var blockhash string
+	if record[rp.Blockhash] != "" {
+		blockhash = strings.ReplaceAll(record[rp.Blockhash], `"`, "")
 	}
+
+	var a *big.Int
+	if record[rp.BidValue] != "" {
+		var ok bool
+		a, ok = big.NewInt(0).SetString(strings.ReplaceAll(record[rp.BidValue], `"`, ""), 10)
+		if !ok {
+			return rBid, fmt.Errorf("error parsing bid: %+v", record[rp.BidValue])
+		}
+	} else {
+		a = big.NewInt(0)
+	}
+
 	return RecordBid{
 		NetworkType: networkType,
 		Time:        time,
 		Slot:        slot,
-		Blockhash:   strings.ReplaceAll(record[rp.Blockhash], `"`, ""),
+		Blockhash:   blockhash,
 		Bid:         a,
 	}, nil
 }
