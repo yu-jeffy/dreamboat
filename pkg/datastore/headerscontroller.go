@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -316,7 +317,15 @@ func (h *IndexedBlocks) PrependContent(hnts []structs.HeaderAndTrace) error {
 			BuilderPubkey: hnt.Trace.BuilderPubkey,
 		}
 
-		h.linkHash(hnt)
+		b, err := json.Marshal(hnt)
+		if err != nil{
+			return err
+		}
+
+		block := structs.CompleteBlockstruct{
+			Header: structs.HeaderData{HeaderAndTrace: hnt, Slot: structs.Slot(hnt.Trace.Slot), Marshaled: b},
+		}
+		h.linkHash(block)
 		if err := h.addContent(newEl); err != nil {
 			h.S.Index = newIndex
 			return err

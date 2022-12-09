@@ -73,8 +73,10 @@ func (s *Datastore) GetMaxProfitHeader(ctx context.Context, slot uint64) (struct
 	// Check memory
 	block, ok := s.hc.GetMaxProfit(uint64(slot))
 	if ok {
-		key := structs.PayloadKey{BlockHash: block.Header.Trace.BlockHash, Proposer: block.Header.Trace.ProposerPubkey, Slot: block.Header.Slot}
-		s.payloadCache.Add(key, &block.Payload)
+		if (block.Payload != structs.BlockBidAndTrace{}) { // if not empty then cache (it may be empty when loading on startup)
+			key := structs.PayloadKey{BlockHash: block.Header.Trace.BlockHash, Proposer: block.Header.Trace.ProposerPubkey, Slot: block.Header.Slot}
+			s.payloadCache.Add(key, &block.Payload)
+		}
 		return block.Header.HeaderAndTrace, nil
 	}
 
@@ -461,7 +463,11 @@ func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) err
 					return err
 				}
 
-				if _, err := tempHC.Add(slot, hnt); err != nil {
+				block := structs.CompleteBlockstruct{
+					Header: structs.HeaderData{HeaderAndTrace: hnt, Slot: structs.Slot(slot), Marshaled: payload.Content},
+				}
+
+				if _, err := tempHC.Add(slot, block); err != nil {
 					return err
 				}
 			}
