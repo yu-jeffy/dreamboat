@@ -37,7 +37,7 @@ type Datastore interface {
 	PutPayload(context.Context, structs.PayloadKey, *structs.BlockBidAndTrace, time.Duration) error
 	GetPayload(context.Context, structs.PayloadKey) (*structs.BlockBidAndTrace, error)
 
-	PutHeader(ctx context.Context, hd structs.HeaderData, ttl time.Duration) error
+	PutHeader(ctx context.Context, block structs.CompleteBlockstruct, ttl time.Duration) error
 	GetMaxProfitHeader(ctx context.Context, slot uint64) (structs.HeaderAndTrace, error)
 
 	PutRegistrationRaw(context.Context, structs.PubKey, []byte, time.Duration) error
@@ -394,24 +394,14 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 		return fmt.Errorf("block submission failed: %w", err)
 	}
 
-	b, err := json.Marshal(complete.Header)
-	if err != nil {
-		logger.WithError(err).Error("PutHeader marshal failed")
-		return err
-	}
-
 	timer4 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("submitBlock", "putPayload"))
-	timer4.ObserveDuration()
-	timer5 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("submitBlock", "putHeader"))
-
 	if err := rs.d.PutPayload(ctx, SubmissionToKey(submitBlockRequest), &complete.Payload, rs.config.TTL); err != nil {
 		return err
 	}
-	err = rs.d.PutHeader(ctx, structs.HeaderData{
-		Slot:           slot,
-		Marshaled:      b,
-		HeaderAndTrace: complete.Header,
-	}, rs.config.TTL)
+	timer4.ObserveDuration()
+
+	timer5 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("submitBlock", "putHeader"))
+	err = rs.d.PutHeader(ctx, complete, rs.config.TTL)
 	if err != nil {
 		logger.WithError(err).Error("PutHeader failed")
 		return err
@@ -444,8 +434,7 @@ func (rs *Relay) prepareContents(submitBlockRequest *types.BuilderSubmitBlockReq
 	if err != nil {
 		return s, err
 	}
-
-	s.Header = structs.HeaderAndTrace{
+	headerAndTrace := structs.HeaderAndTrace{
 		Header: header,
 		Trace: &structs.BidTraceWithTimestamp{
 			BidTraceExtended: structs.BidTraceExtended{
@@ -465,6 +454,17 @@ func (rs *Relay) prepareContents(submitBlockRequest *types.BuilderSubmitBlockReq
 			},
 			Timestamp: s.Payload.Payload.Data.Timestamp,
 		},
+	}
+
+	b, err := json.Marshal(headerAndTrace)
+	if err != nil {
+		return structs.CompleteBlockstruct{}, err
+	}
+
+	s.Header = structs.HeaderData{
+		HeaderAndTrace: headerAndTrace,
+		Slot:           structs.Slot(s.Payload.Trace.Message.Slot),
+		Marshaled:      b,
 	}
 
 	return s, nil

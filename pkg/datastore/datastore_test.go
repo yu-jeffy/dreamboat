@@ -33,7 +33,7 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher4", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := datastore.NewBlockController(200, time.Hour)
 	d := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc)
 
 	header := randomHeaderAndTrace()

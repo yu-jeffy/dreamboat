@@ -221,6 +221,6 @@ func (hd *HeaderData) UnmarshalJSON(b []byte) error {
 
 // / That's to be improved in future
 type CompleteBlockstruct struct {
-	Header  HeaderAndTrace
+	Header  HeaderData
 	Payload BlockBidAndTrace
 }

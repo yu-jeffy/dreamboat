@@ -11,6 +11,7 @@ import (
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/dgraph-io/badger/v2"
 	"github.com/flashbots/go-boost-utils/types"
+	lru "github.com/hashicorp/golang-lru/v2"
 	ds "github.com/ipfs/go-datastore"
 )
 
@@ -35,15 +36,18 @@ type Datastore struct {
 	TTLStorage
 	Badger
 
-	hc *HeaderController
-	l  sync.Mutex
+	hc           *BlockController
+	l            sync.Mutex
+	payloadCache *lru.Cache[structs.PayloadKey, *structs.BlockBidAndTrace]
 }
 
-func NewDatastore(t TTLStorage, v Badger, hc *HeaderController) *Datastore {
+func NewDatastore(t TTLStorage, v Badger, hc *BlockController) *Datastore {
+	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](1_000)
 	return &Datastore{
-		TTLStorage: t,
-		Badger:     v,
-		hc:         hc,
+		TTLStorage:   t,
+		Badger:       v,
+		hc:           hc,
+		payloadCache: cache,
 	}
 }
 
@@ -134,16 +138,6 @@ func (s *Datastore) PutPayload(ctx context.Context, key structs.PayloadKey, payl
 		return err
 	}
 	return s.TTLStorage.PutWithTTL(ctx, PayloadKeyKey(key), data, ttl)
-}
-
-func (s *Datastore) GetPayload(ctx context.Context, key structs.PayloadKey) (*structs.BlockBidAndTrace, error) {
-	data, err := s.TTLStorage.Get(ctx, PayloadKeyKey(key))
-	if err != nil {
-		return nil, err
-	}
-	var payload structs.BlockBidAndTrace
-	err = json.Unmarshal(data, &payload)
-	return &payload, err
 }
 
 func (s *Datastore) PutRegistration(ctx context.Context, pk structs.PubKey, registration types.SignedValidatorRegistration, ttl time.Duration) error {

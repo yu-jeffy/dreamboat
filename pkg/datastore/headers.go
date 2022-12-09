@@ -71,9 +71,11 @@ type SlotInfo struct {
 
 func (s *Datastore) GetMaxProfitHeader(ctx context.Context, slot uint64) (structs.HeaderAndTrace, error) {
 	// Check memory
-	p, ok := s.hc.GetMaxProfit(uint64(slot))
+	block, ok := s.hc.GetMaxProfit(uint64(slot))
 	if ok {
-		return p, nil
+		key := structs.PayloadKey{BlockHash: block.Header.Trace.BlockHash, Proposer: block.Header.Trace.ProposerPubkey, Slot: block.Header.Slot}
+		s.payloadCache.Add(key, &block.Payload)
+		return block.Header.HeaderAndTrace, nil
 	}
 
 	// Check new
@@ -123,12 +125,12 @@ func (s *Datastore) getMaxHeader(ctx context.Context, slot uint64) (h structs.He
 	return h, err
 }
 
-func (s *Datastore) PutHeader(ctx context.Context, hd structs.HeaderData, ttl time.Duration) (err error) {
-	if err := storeHeader(s.Badger, hd, ttl); err != nil {
+func (s *Datastore) PutHeader(ctx context.Context, block structs.CompleteBlockstruct, ttl time.Duration) (err error) {
+	if err := storeHeader(s.Badger, block.Header, ttl); err != nil {
 		return err
 	}
 
-	newlyCreated, err := s.hc.Add(uint64(hd.Slot), hd.HeaderAndTrace)
+	newlyCreated, err := s.hc.Add(uint64(block.Header.Slot), block)
 	if err != nil {
 		return err
 	}
@@ -138,7 +140,7 @@ func (s *Datastore) PutHeader(ctx context.Context, hd structs.HeaderData, ttl ti
 	}
 
 	// check and load keys if exists
-	return s.loadKeysAndCleanup(ctx, uint64(hd.Slot))
+	return s.loadKeysAndCleanup(ctx, uint64(block.Header.Slot))
 }
 
 func (s *Datastore) loadKeysAndCleanup(ctx context.Context, slot uint64) error {
@@ -347,7 +349,7 @@ func (s *Datastore) saveHeader(ctx context.Context, slot uint64, ttl time.Durati
 	return errors.New("revision changed")
 }
 
-func putHeaders(ctx context.Context, s *Datastore, slot uint64, cont []structs.HeaderAndTrace, ttl time.Duration) error {
+func putHeaders(ctx context.Context, s *Datastore, slot uint64, cont []structs.CompleteBlockstruct, ttl time.Duration) error {
 	buff := bytes.NewBuffer(nil)
 	buff.WriteString("[")
 
@@ -356,7 +358,7 @@ func putHeaders(ctx context.Context, s *Datastore, slot uint64, cont []structs.H
 		if i > 0 {
 			buff.WriteString(",")
 		}
-		if err := enc.Encode(c); err != nil {
+		if err := enc.Encode(c.Header.HeaderAndTrace); err != nil {
 			return err
 		}
 	}
@@ -441,7 +443,7 @@ func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) err
 	buff := new(bytes.Buffer)
 	for slot, v := range slotDoesNotExist {
 		if v != nil || len(v) != 0 {
-			tempHC := NewHeaderController(100, time.Hour) // params doesn't matter here
+			tempHC := NewBlockController(100, time.Hour) // params doesn't matter here
 
 			buff.Reset()
 			sort.Slice(v, func(i, j int) bool {
@@ -472,7 +474,7 @@ func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) err
 			if !ok {
 				return errors.New("max profit from records not calculated")
 			}
-			if err := s.TTLStorage.PutWithTTL(ctx, HeaderMaxNewKey(slot), []byte(maxProfit.Trace.BlockHash.String()), ttl); err != nil {
+			if err := s.TTLStorage.PutWithTTL(ctx, HeaderMaxNewKey(slot), []byte(maxProfit.Header.Trace.BlockHash.String()), ttl); err != nil {
 				return err
 			}
 		}

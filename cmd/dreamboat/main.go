@@ -268,7 +268,7 @@ func run() cli.ActionFunc {
 		timeRelayStart := time.Now()
 		as := &pkg.AtomicState{}
 
-		hc := datastore.NewHeaderController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
+		hc := datastore.NewBlockController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
 		hc.AttachMetrics(m)
 
 		ds := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{storage}, storage.DB, hc)

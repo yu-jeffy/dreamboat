@@ -9,8 +9,8 @@ import (
 	"github.com/blocknative/dreamboat/pkg/structs"
 )
 
-type HeaderController struct {
-	headers map[uint64]*IndexedHeaders
+type BlockController struct {
+	blocks  map[uint64]*IndexedBlocks
 	ordered []SlotInfo
 
 	slotLag     uint64
@@ -19,22 +19,22 @@ type HeaderController struct {
 	latestSlot *uint64
 	cl         sync.RWMutex
 
-	m HeaderControllerMetrics
+	m BlocksControllerMetrics
 }
 
-func NewHeaderController(slotLag uint64, slotTimeLag time.Duration) *HeaderController {
+func NewBlockController(slotLag uint64, slotTimeLag time.Duration) *BlockController {
 	latestSlot := uint64(0)
-	hc := &HeaderController{
+	hc := &BlockController{
 		slotLag:     slotLag,
 		slotTimeLag: slotTimeLag,
 		latestSlot:  &latestSlot,
-		headers:     make(map[uint64]*IndexedHeaders),
+		blocks:      make(map[uint64]*IndexedBlocks),
 	}
 	hc.initMetrics()
 	return hc
 }
 
-func (hc *HeaderController) CheckForRemoval() (toBeRemoved []uint64, ok bool) {
+func (hc *BlockController) CheckForRemoval() (toBeRemoved []uint64, ok bool) {
 	hc.cl.RLock()
 	defer hc.cl.RUnlock()
 	if len(hc.ordered) == 0 {
@@ -55,7 +55,7 @@ func (hc *HeaderController) CheckForRemoval() (toBeRemoved []uint64, ok bool) {
 
 }
 
-func (hc *HeaderController) getOrderedDesc() (info []uint64) {
+func (hc *BlockController) getOrderedDesc() (info []uint64) {
 	hc.cl.RLock()
 	defer hc.cl.RUnlock()
 	info = make([]uint64, len(hc.ordered))
@@ -67,7 +67,7 @@ func (hc *HeaderController) getOrderedDesc() (info []uint64) {
 }
 
 // addToOrdered to be run in lock
-func (hc *HeaderController) addToOrdered(i SlotInfo) {
+func (hc *BlockController) addToOrdered(i SlotInfo) {
 	hc.ordered = append(hc.ordered, i)
 	l := len(hc.ordered)
 	if l > 1 {
@@ -80,18 +80,18 @@ func (hc *HeaderController) addToOrdered(i SlotInfo) {
 	}
 }
 
-func (hc *HeaderController) GetLatestSlot() (slot uint64) {
+func (hc *BlockController) GetLatestSlot() (slot uint64) {
 	return atomic.LoadUint64(hc.latestSlot)
 }
 
-func (hc *HeaderController) PrependMultiple(slot uint64, hnt []structs.HeaderAndTrace) (err error) {
+func (hc *BlockController) PrependMultiple(slot uint64, hnt []structs.HeaderAndTrace) (err error) {
 	hc.cl.Lock()
 	defer hc.cl.Unlock()
 
-	h, ok := hc.headers[slot]
+	h, ok := hc.blocks[slot]
 	if !ok {
 		h = NewIndexedHeaders()
-		hc.headers[slot] = h
+		hc.blocks[slot] = h
 		hc.addToOrdered(SlotInfo{
 			Slot:  slot,
 			Added: time.Now(),
@@ -112,14 +112,14 @@ func (hc *HeaderController) PrependMultiple(slot uint64, hnt []structs.HeaderAnd
 	return nil
 }
 
-func (hc *HeaderController) Add(slot uint64, hnt structs.HeaderAndTrace) (newCreated bool, err error) {
+func (hc *BlockController) Add(slot uint64, hnt structs.CompleteBlockstruct) (newCreated bool, err error) {
 	hc.cl.Lock()
 	defer hc.cl.Unlock()
 
-	h, ok := hc.headers[slot]
+	h, ok := hc.blocks[slot]
 	if !ok {
 		h = NewIndexedHeaders()
-		hc.headers[slot] = h
+		hc.blocks[slot] = h
 		hc.addToOrdered(SlotInfo{
 			Slot:  slot,
 			Added: time.Now(),
@@ -133,24 +133,26 @@ func (hc *HeaderController) Add(slot uint64, hnt structs.HeaderAndTrace) (newCre
 		}
 	}
 	hc.m.HeadersAdded.Inc()
-	hc.m.HeadersSize.Set(float64(len(hc.headers)))
+	hc.m.HeadersSize.Set(float64(len(hc.blocks)))
 	return newCreated, h.AddContent(hnt)
 }
 
-func (hc *HeaderController) GetHeaders(startingSlot, stopSlot uint64, limit int) (elements []structs.HeaderAndTrace, lastSlot uint64) {
+func (hc *BlockController) GetHeaders(startingSlot, stopSlot uint64, limit int) (elements []structs.HeaderAndTrace, lastSlot uint64) {
 	for _, o := range hc.getOrderedDesc() {
 		if o > startingSlot || o < stopSlot {
 			continue
 		}
 		hc.cl.RLock()
-		h, ok := hc.headers[o]
+		h, ok := hc.blocks[o]
 		hc.cl.RUnlock()
 		if !ok || h == nil {
 			continue
 		}
 		lastSlot = o
 		c, _, _ := h.GetContent()
-		elements = append(elements, c...)
+		for _, block := range c {
+			elements = append(elements, block.Header.HeaderAndTrace)
+		}
 		if len(elements) >= limit {
 			return elements, lastSlot
 		}
@@ -159,9 +161,9 @@ func (hc *HeaderController) GetHeaders(startingSlot, stopSlot uint64, limit int)
 	return elements, lastSlot
 }
 
-func (hc *HeaderController) GetSingleSlot(slot uint64) (elements []structs.HeaderAndTrace, maxProfitHash [32]byte, revision uint64, err error) {
+func (hc *BlockController) GetSingleSlot(slot uint64) (elements []structs.CompleteBlockstruct, maxProfitHash [32]byte, revision uint64, err error) {
 	hc.cl.RLock()
-	h, ok := hc.headers[slot]
+	h, ok := hc.blocks[slot]
 	hc.cl.RUnlock()
 
 	if !ok {
@@ -171,11 +173,11 @@ func (hc *HeaderController) GetSingleSlot(slot uint64) (elements []structs.Heade
 	return elements, maxProfitHash, revision, err
 }
 
-func (hc *HeaderController) RemoveSlot(slot, expectedRevision uint64) (success bool) {
+func (hc *BlockController) RemoveSlot(slot, expectedRevision uint64) (success bool) {
 	hc.cl.Lock()
 	defer hc.cl.Unlock()
 
-	s, ok := hc.headers[slot]
+	s, ok := hc.blocks[slot]
 	if !ok {
 		return true
 	}
@@ -186,8 +188,8 @@ func (hc *HeaderController) RemoveSlot(slot, expectedRevision uint64) (success b
 
 	// we're only unlinking from map here
 	// it should be later on eligible for GC
-	delete(hc.headers, slot)
-	hc.m.HeadersSize.Set(float64(len(hc.headers)))
+	delete(hc.blocks, slot)
+	hc.m.HeadersSize.Set(float64(len(hc.blocks)))
 
 	// removed element should be first on the left
 	if len(hc.ordered) > 0 {
@@ -202,11 +204,11 @@ func (hc *HeaderController) RemoveSlot(slot, expectedRevision uint64) (success b
 	return true
 }
 
-func (hc *HeaderController) GetMaxProfit(slot uint64) (hnt structs.HeaderAndTrace, ok bool) {
+func (hc *BlockController) GetMaxProfit(slot uint64) (hnt structs.CompleteBlockstruct, ok bool) {
 	hc.cl.RLock()
 	defer hc.cl.RUnlock()
 
-	s, ok := hc.headers[slot]
+	s, ok := hc.blocks[slot]
 	if !ok {
 		return hnt, false
 	}
@@ -214,36 +216,36 @@ func (hc *HeaderController) GetMaxProfit(slot uint64) (hnt structs.HeaderAndTrac
 
 }
 
-type IndexedHeaders struct {
+type IndexedBlocks struct {
 	S StoredIndex
 
 	rev                        uint64
-	content                    []structs.HeaderAndTrace
+	content                    []structs.CompleteBlockstruct
 	blockHashToContentPosition map[[32]byte]int
 	contentLock                sync.RWMutex
 }
 
-func NewIndexedHeaders() (h *IndexedHeaders) {
-	return &IndexedHeaders{
+func NewIndexedHeaders() (h *IndexedBlocks) {
+	return &IndexedBlocks{
 		S:                          NewStoreIndex(),
 		blockHashToContentPosition: make(map[[32]byte]int),
 	}
 }
 
-func (h *IndexedHeaders) GetRevision() (revision uint64) {
+func (h *IndexedBlocks) GetRevision() (revision uint64) {
 	h.contentLock.RLock()
 	defer h.contentLock.RUnlock()
 	return h.rev
 }
 
-func (h *IndexedHeaders) GetContent() (content []structs.HeaderAndTrace, maxProfitHash [32]byte, revision uint64) {
+func (h *IndexedBlocks) GetContent() (content []structs.CompleteBlockstruct, maxProfitHash [32]byte, revision uint64) {
 	h.contentLock.RLock()
 	defer h.contentLock.RUnlock()
 
 	return h.content, h.S.MaxProfit.Hash, h.rev
 }
 
-func (h *IndexedHeaders) GetMaxProfit() (hnt structs.HeaderAndTrace, ok bool) {
+func (h *IndexedBlocks) GetMaxProfit() (hnt structs.CompleteBlockstruct, ok bool) {
 	h.contentLock.RLock()
 	defer h.contentLock.RUnlock()
 
@@ -257,15 +259,15 @@ func (h *IndexedHeaders) GetMaxProfit() (hnt structs.HeaderAndTrace, ok bool) {
 	return h.content[n], true
 }
 
-func (h *IndexedHeaders) linkHash(hnt structs.HeaderAndTrace) {
-	_, ok := h.blockHashToContentPosition[hnt.Trace.BlockHash]
+func (h *IndexedBlocks) linkHash(block structs.CompleteBlockstruct) {
+	_, ok := h.blockHashToContentPosition[block.Header.Trace.BlockHash]
 	if !ok {
-		h.content = append(h.content, hnt)
-		h.blockHashToContentPosition[hnt.Trace.BlockHash] = len(h.content) - 1
+		h.content = append(h.content, block)
+		h.blockHashToContentPosition[block.Header.Trace.BlockHash] = len(h.content) - 1
 	}
 }
 
-func (h *IndexedHeaders) addContent(newEl IndexMeta) error {
+func (h *IndexedBlocks) addContent(newEl IndexMeta) error {
 	h.S.Index = append(h.S.Index, newEl)
 	h.S.SubmissionsByPubKeys[newEl.BuilderPubkey] = newEl
 
@@ -287,22 +289,22 @@ func (h *IndexedHeaders) addContent(newEl IndexMeta) error {
 	return nil
 }
 
-func (h *IndexedHeaders) AddContent(hnt structs.HeaderAndTrace) error {
+func (h *IndexedBlocks) AddContent(block structs.CompleteBlockstruct) error {
 	h.contentLock.Lock()
 	defer h.contentLock.Unlock()
 
 	newEl := IndexMeta{
-		Hash:          hnt.Trace.BlockHash,
-		Value:         hnt.Trace.Value.BigInt(),
-		BuilderPubkey: hnt.Trace.BuilderPubkey,
+		Hash:          block.Header.Trace.BlockHash,
+		Value:         block.Header.Trace.Value.BigInt(),
+		BuilderPubkey: block.Header.Trace.BuilderPubkey,
 	}
 
-	h.linkHash(hnt)
+	h.linkHash(block)
 	h.rev++
 	return h.addContent(newEl)
 }
 
-func (h *IndexedHeaders) PrependContent(hnts []structs.HeaderAndTrace) error {
+func (h *IndexedBlocks) PrependContent(hnts []structs.HeaderAndTrace) error {
 	h.contentLock.Lock()
 	defer h.contentLock.Unlock()
 

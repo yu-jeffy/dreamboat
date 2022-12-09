@@ -24,7 +24,7 @@ func InitDatastoreMetrics(m *met.Metrics) error {
 	})
 }
 
-type HeaderControllerMetrics struct {
+type BlocksControllerMetrics struct {
 	LatestSlot    prometheus.Gauge
 	HeadersSize   prometheus.Gauge
 	RemovalChecks prometheus.Gauge
@@ -32,7 +32,7 @@ type HeaderControllerMetrics struct {
 	HeadersAdded prometheus.Counter
 }
 
-func (r *HeaderController) initMetrics() {
+func (r *BlockController) initMetrics() {
 	r.m.LatestSlot = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "dreamboat",
 		Subsystem: "datastore",
@@ -62,7 +62,7 @@ func (r *HeaderController) initMetrics() {
 	})
 }
 
-func (r *HeaderController) AttachMetrics(m *metrics.Metrics) {
+func (r *BlockController) AttachMetrics(m *metrics.Metrics) {
 	m.Register(r.m.LatestSlot)
 	m.Register(r.m.HeadersSize)
 	m.Register(r.m.RemovalChecks)
