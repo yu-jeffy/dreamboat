@@ -453,18 +453,37 @@ func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) err
 			})
 
 			buff.WriteString("[")
-			for i, payload := range v {
+			for i, rawHeader := range v {
 				if i > 0 {
 					buff.WriteString(",")
 				}
-				io.Copy(buff, bytes.NewReader(payload.Content))
+				io.Copy(buff, bytes.NewReader(rawHeader.Content))
 				hnt := structs.HeaderAndTrace{}
-				if err := json.Unmarshal(payload.Content, &hnt); err != nil {
+				if err := json.Unmarshal(rawHeader.Content, &hnt); err != nil {
 					return err
 				}
 
+				key := structs.PayloadKey{BlockHash: hnt.Header.BlockHash, Proposer: hnt.Trace.ProposerPubkey, Slot: structs.Slot(hnt.Trace.Slot)}
+
+				// load payload
+				txn := s.Badger.NewTransaction(true)
+				payloadItem, err := txn.Get(PayloadKeyKey(key).Bytes())
+				if err != nil {
+					return err
+				}
+
+				b, err := payloadItem.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+
+				var payload structs.BlockBidAndTrace
+				if err := json.Unmarshal(b, &payload); err != nil {
+					return err
+				}
 				block := structs.CompleteBlockstruct{
-					Header: structs.HeaderData{HeaderAndTrace: hnt, Slot: structs.Slot(slot), Marshaled: payload.Content},
+					Header:  structs.HeaderData{HeaderAndTrace: hnt, Slot: structs.Slot(slot), Marshaled: rawHeader.Content},
+					Payload: payload,
 				}
 
 				if _, err := tempHC.Add(slot, block); err != nil {
