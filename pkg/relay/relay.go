@@ -223,28 +223,14 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 		return nil, fmt.Errorf("signature invalid") // err
 	}
 
-	respChA := NewRespC(1)
-	rs.regMngr.GetVerifyChan(ResponseQueueOther) <- VerifyReq{
-		Signature: payloadRequest.Signature,
-		Pubkey:    pk,
-		Msg:       msg,
-		Response:  respChA}
-
-	select {
-	case err = <-respChA.Done():
-	case <-ctx.Done():
-		err = ctx.Err()
-		respChA.Close(0, err)
-		return nil, err
-	}
-
-	timer2.ObserveDuration()
-	if err != nil {
+	ok, err := VerifySignatureBytes(msg, payloadRequest.Signature[:], pk[:])
+	if !ok || err != nil {
 		logger.WithField(
 			"pubkey", proposerPubkey,
 		).Error("signature invalid")
 		return nil, fmt.Errorf("signature invalid")
 	}
+	timer2.ObserveDuration()
 
 	timer3 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getPayload", "getPayload"))
 	key := structs.PayloadKey{
@@ -276,38 +262,39 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 		"numTx":            len(payload.Payload.Data.Transactions),
 	}).Info("payload fetched")
 
-	timer4 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getPayload", "putDelivered"))
 	response := types.GetPayloadResponse{
 		Version: "bellatrix",
 		Data:    payload.Payload.Data,
 	}
+	go func() {
+		timer4 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getPayload", "putDelivered"))
 
-	trace := structs.DeliveredTrace{
-		Trace: structs.BidTraceWithTimestamp{
-			BidTraceExtended: structs.BidTraceExtended{
-				BidTrace: types.BidTrace{
-					Slot:                 payloadRequest.Message.Slot,
-					ParentHash:           payload.Payload.Data.ParentHash,
-					BlockHash:            payload.Payload.Data.BlockHash,
-					BuilderPubkey:        payload.Trace.Message.BuilderPubkey,
-					ProposerPubkey:       payload.Trace.Message.ProposerPubkey,
-					ProposerFeeRecipient: payload.Trace.Message.ProposerFeeRecipient,
-					GasLimit:             payload.Payload.Data.GasLimit,
-					GasUsed:              payload.Payload.Data.GasUsed,
-					Value:                payload.Trace.Message.Value,
+		trace := structs.DeliveredTrace{
+			Trace: structs.BidTraceWithTimestamp{
+				BidTraceExtended: structs.BidTraceExtended{
+					BidTrace: types.BidTrace{
+						Slot:                 payloadRequest.Message.Slot,
+						ParentHash:           payload.Payload.Data.ParentHash,
+						BlockHash:            payload.Payload.Data.BlockHash,
+						BuilderPubkey:        payload.Trace.Message.BuilderPubkey,
+						ProposerPubkey:       payload.Trace.Message.ProposerPubkey,
+						ProposerFeeRecipient: payload.Trace.Message.ProposerFeeRecipient,
+						GasLimit:             payload.Payload.Data.GasLimit,
+						GasUsed:              payload.Payload.Data.GasUsed,
+						Value:                payload.Trace.Message.Value,
+					},
+					BlockNumber: payload.Payload.Data.BlockNumber,
+					NumTx:       uint64(len(payload.Payload.Data.Transactions)),
 				},
-				BlockNumber: payload.Payload.Data.BlockNumber,
-				NumTx:       uint64(len(payload.Payload.Data.Transactions)),
+				Timestamp: payload.Payload.Data.Timestamp,
 			},
-			Timestamp: payload.Payload.Data.Timestamp,
-		},
-		BlockNumber: payload.Payload.Data.BlockNumber,
-	}
-
-	if err := rs.d.PutDelivered(ctx, structs.Slot(payloadRequest.Message.Slot), trace, rs.config.TTL); err != nil {
-		rs.l.WithError(err).Warn("failed to set payload after delivery")
-	}
-	timer4.ObserveDuration()
+			BlockNumber: payload.Payload.Data.BlockNumber,
+		}
+		if err := rs.d.PutDelivered(ctx, structs.Slot(payloadRequest.Message.Slot), trace, rs.config.TTL); err != nil {
+			rs.l.WithError(err).Warn("failed to set payload after delivery")
+			timer4.ObserveDuration()
+		}
+	}()
 
 	logger.With(log.F{
 		"slot":             payloadRequest.Message.Slot,
