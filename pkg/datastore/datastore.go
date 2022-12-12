@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/lthibault/log"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type Badger interface {
 type Datastore struct {
 	TTLStorage
 	Badger
+	Logger log.Logger
 
 	hc           *BlockController
 	l            sync.Mutex

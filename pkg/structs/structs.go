@@ -139,6 +139,14 @@ type PayloadKey struct {
 	Slot      Slot
 }
 
+func (p PayloadKey) Loggable() map[string]any {
+	return map[string]any{
+		"slot":     p.Slot,
+		"block":    p.BlockHash,
+		"proposer": p.Proposer,
+	}
+}
+
 type DeliveredTrace struct {
 	Trace       BidTraceWithTimestamp
 	BlockNumber uint64

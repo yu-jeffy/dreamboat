@@ -76,6 +76,7 @@ func (s *Datastore) GetMaxProfitHeader(ctx context.Context, slot uint64) (struct
 		if (block.Payload != structs.BlockBidAndTrace{}) { // if not empty then cache (it may be empty when loading on startup)
 			key := structs.PayloadKey{BlockHash: block.Header.Trace.BlockHash, Proposer: block.Header.Trace.ProposerPubkey, Slot: block.Header.Slot}
 			s.payloadCache.Add(key, &block.Payload)
+			s.Logger.With(key).Debug("payload cached")
 		}
 		return block.Header.HeaderAndTrace, nil
 	}

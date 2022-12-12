@@ -9,8 +9,10 @@ import (
 
 func (s *Datastore) GetPayload(ctx context.Context, key structs.PayloadKey) (*structs.BlockBidAndTrace, error) {
 	if payload, ok := s.payloadCache.Get(key); ok {
+		s.Logger.With(key).Debug("payload cache hit")
 		return payload, nil
 	}
+	s.Logger.With(key).Debug("payload cache miss")
 
 	data, err := s.TTLStorage.Get(ctx, PayloadKeyKey(key))
 	if err != nil {
