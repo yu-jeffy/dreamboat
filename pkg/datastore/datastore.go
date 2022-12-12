@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/lthibault/log"
 	"sync"
 	"time"
+
+	"github.com/lthibault/log"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
 	"github.com/dgraph-io/badger/v2"
@@ -43,11 +44,12 @@ type Datastore struct {
 	payloadCache *lru.Cache[structs.PayloadKey, *structs.BlockBidAndTrace]
 }
 
-func NewDatastore(t TTLStorage, v Badger, hc *BlockController) *Datastore {
+func NewDatastore(t TTLStorage, v Badger, hc *BlockController, logger log.Logger) *Datastore {
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](1_000)
 	return &Datastore{
 		TTLStorage:   t,
 		Badger:       v,
+		Logger:       logger,
 		hc:           hc,
 		payloadCache: cache,
 	}

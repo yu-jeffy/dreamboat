@@ -271,7 +271,7 @@ func run() cli.ActionFunc {
 		hc := datastore.NewBlockController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
 		hc.AttachMetrics(m)
 
-		ds := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{storage}, storage.DB, hc)
+		ds := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{storage}, storage.DB, hc, config.Log)
 		if err = datastore.InitDatastoreMetrics(m); err != nil {
 			return err
 		}
