@@ -314,8 +314,10 @@ type LoadItem struct {
 	Content []byte
 }
 
+type NewHeaderControllerFunc func(slotLag uint64, slotTimeLag time.Duration) HeaderController
+
 // FixOrphanHeaders is reading all the orphan headers from
-func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) error {
+func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration, nh NewHeaderControllerFunc) error {
 	slotDoesNotExist := make(map[uint64][]LoadItem)
 
 	slotExists := make(map[uint64]struct{})
@@ -381,7 +383,7 @@ func (s *Datastore) FixOrphanHeaders(ctx context.Context, ttl time.Duration) err
 	buff := new(bytes.Buffer)
 	for slot, v := range slotDoesNotExist {
 		if v != nil || len(v) != 0 {
-			tempHC := NewHeaderController(100, time.Hour) // params doesn't matter here
+			tempHC := nh(100, time.Hour) // params doesn't matter here
 
 			buff.Reset()
 			sort.Slice(v, func(i, j int) bool {

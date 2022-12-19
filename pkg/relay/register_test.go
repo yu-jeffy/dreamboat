@@ -9,7 +9,7 @@ import (
 
 	pkg "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/auction"
-	"github.com/blocknative/dreamboat/pkg/datastore"
+	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	mock_relay "github.com/blocknative/dreamboat/pkg/relay/mocks"
 	"github.com/blocknative/dreamboat/pkg/structs"
@@ -33,7 +33,7 @@ func TestRegisterValidator(t *testing.T) {
 
 	var datadir = "/tmp/" + t.Name() + uuid.New().String()
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := &datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := &dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}}
 	bs := mock_relay.NewMockState(ctrl)
 
 	relaySigningDomain, err := pkg.ComputeDomain(
@@ -96,7 +96,7 @@ func TestBrokenSignatureRegisterValidator(t *testing.T) {
 
 	var datadir = "/tmp/" + t.Name() + uuid.New().String()
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := &datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := &dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}}
 	bs := mock_relay.NewMockState(ctrl)
 
 	relaySigningDomain, err := pkg.ComputeDomain(
@@ -172,7 +172,7 @@ func TestNotKnownRegisterValidator(t *testing.T) {
 
 	var datadir = "/tmp/" + t.Name() + uuid.New().String()
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := &datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := &dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}}
 	bs := mock_relay.NewMockState(ctrl)
 
 	relaySigningDomain, err := pkg.ComputeDomain(
@@ -281,7 +281,7 @@ func BenchmarkRegisterValidatorParallel(b *testing.B) {
 
 	var datadir = "/tmp/" + b.Name() + uuid.New().String()
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := &datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}}
+	ds := &dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}}
 
 	relaySigningDomain, _ := pkg.ComputeDomain(
 		types.DomainTypeAppBuilder,

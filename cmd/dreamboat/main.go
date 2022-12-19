@@ -289,7 +289,10 @@ func run() cli.ActionFunc {
 			return err
 		}
 
-		if err = ds.FixOrphanHeaders(c.Context, config.TTL); err != nil {
+		if err = ds.FixOrphanHeaders(c.Context, config.TTL,
+			func(slotLag uint64, slotTimeLag time.Duration) dsbadger.HeaderController {
+				return datastore.NewHeaderController(slotLag, slotTimeLag)
+			}); err != nil {
 			return err
 		}
 

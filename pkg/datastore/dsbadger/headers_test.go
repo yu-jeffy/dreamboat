@@ -501,7 +501,10 @@ func TestGetPutComplex(t *testing.T) {
 	_, err = ds.GetHeadersBySlot(ctx, uint64(slot))
 	require.Error(t, dsbadger.ErrNotFound, err)
 
-	err = ds.FixOrphanHeaders(ctx, time.Hour)
+	err = ds.FixOrphanHeaders(ctx, time.Hour,
+		func(slotLag uint64, slotTimeLag time.Duration) dsbadger.HeaderController {
+			return datastore.NewHeaderController(slotLag, slotTimeLag)
+		})
 	require.NoError(t, err)
 
 	har, err := ds.GetHeadersBySlot(ctx, uint64(slot))
