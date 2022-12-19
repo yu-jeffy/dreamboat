@@ -15,6 +15,7 @@ import (
 	"github.com/blocknative/dreamboat/pkg/api"
 	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore"
+	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
@@ -280,11 +281,11 @@ func run() cli.ActionFunc {
 		hc := datastore.NewHeaderController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
 		hc.AttachMetrics(m)
 
-		ds, err := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{storage}, storage.DB, hc, c.Int("relay-payload-cache-size")) // TODO: make cache size parameter
+		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{storage}, storage.DB, hc, c.Int("relay-payload-cache-size")) // TODO: make cache size parameter
 		if err != nil {
 			return fmt.Errorf("fail to create datastore: %w", err)
 		}
-		if err = datastore.InitDatastoreMetrics(m); err != nil {
+		if err = dsbadger.InitDatastoreMetrics(m); err != nil {
 			return err
 		}
 
@@ -428,7 +429,7 @@ func closemanager(ctx context.Context, finish chan struct{}, regMgr *relay.Proce
 	finish <- struct{}{}
 }
 
-func loadRegistrations(ds *datastore.Datastore, regMgr *relay.ProcessManager, logger log.Logger) {
+func loadRegistrations(ds *dsbadger.Datastore, regMgr *relay.ProcessManager, logger log.Logger) {
 	reg, err := ds.GetAllRegistration()
 	if err == nil {
 		for k, v := range reg {

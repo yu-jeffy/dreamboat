@@ -1,4 +1,4 @@
-package datastore_test
+package dsbadger_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/lthibault/log"
 
 	datastore "github.com/blocknative/dreamboat/pkg/datastore"
+	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	"github.com/flashbots/go-boost-utils/types"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
@@ -35,7 +36,7 @@ func TestPutGetHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := datastore.NewHeaderController(200, time.Hour)
-	ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	header := randomHeaderAndTrace()
@@ -86,7 +87,7 @@ func TestPutGetHeaderDuplicate(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := datastore.NewHeaderController(200, time.Hour)
-	ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	header := randomHeaderAndTrace()
@@ -126,7 +127,7 @@ func TestPutGetHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := datastore.NewHeaderController(200, time.Hour)
-	ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	headers := make([]structs.HeaderAndTrace, N)
@@ -214,7 +215,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 		require.NoError(t, err)
 
 		hc := datastore.NewHeaderController(200, time.Hour)
-		ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 		require.NoError(t, err)
 		for i, payload := range batch {
 			jsHeader, _ := json.Marshal(payload)
@@ -240,7 +241,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 		store, err := badger.NewDatastore("/tmp/BadgerBatcher6", &badger.DefaultOptions)
 		require.NoError(t, err)
 		hc := datastore.NewHeaderController(200, time.Hour)
-		ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 		require.NoError(t, err)
 
 		for i, payload := range batch {
@@ -292,7 +293,7 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher7", &badger.DefaultOptions)
 	require.NoError(t, err)
 	hc := datastore.NewHeaderController(200, time.Hour)
-	ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	for i, header := range headers {
@@ -334,7 +335,7 @@ func TestGetPutComplex(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := datastore.NewHeaderController(0, 0) // remove immediately
-	ds, err := datastore.NewDatastore( &datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	header := randomHeaderAndTrace()
@@ -491,14 +492,14 @@ func TestGetPutComplex(t *testing.T) {
 	require.EqualValues(t, hnt2, h)
 
 	// remove wraps
-	err = store.Delete(ctx, datastore.HeaderKey(uint64(slot)))
+	err = store.Delete(ctx, dsbadger.HeaderKey(uint64(slot)))
 	require.NoError(t, err)
 
-	err = store.Delete(ctx, datastore.HeaderMaxNewKey(uint64(slot)))
+	err = store.Delete(ctx, dsbadger.HeaderMaxNewKey(uint64(slot)))
 	require.NoError(t, err)
 
 	_, err = ds.GetHeadersBySlot(ctx, uint64(slot))
-	require.Error(t, datastore.ErrNotFound, err)
+	require.Error(t, dsbadger.ErrNotFound, err)
 
 	err = ds.FixOrphanHeaders(ctx, time.Hour)
 	require.NoError(t, err)

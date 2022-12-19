@@ -1,4 +1,4 @@
-package datastore
+package dsbadger
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
@@ -44,29 +43,6 @@ func HeaderKey(slot uint64) ds.Key {
 // OLD Entries
 func HeaderMaxProfitKey(slot uint64) ds.Key {
 	return ds.NewKey(fmt.Sprintf("header/max-profit/%d", slot))
-}
-
-type StoredIndex struct {
-	Index                []IndexMeta
-	MaxProfit            IndexMeta
-	SubmissionsByPubKeys map[[48]byte]IndexMeta
-}
-
-func NewStoreIndex() StoredIndex {
-	return StoredIndex{
-		SubmissionsByPubKeys: make(map[[48]byte]IndexMeta),
-	}
-}
-
-type IndexMeta struct {
-	Hash          [32]byte
-	Value         *big.Int
-	BuilderPubkey [48]byte
-}
-
-type SlotInfo struct {
-	Slot  uint64
-	Added time.Time
 }
 
 func (s *Datastore) GetMaxProfitHeader(ctx context.Context, slot uint64) (structs.HeaderAndTrace, error) {

@@ -1,4 +1,4 @@
-package datastore_test
+package dsbadger_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	pkg "github.com/blocknative/dreamboat/pkg"
 	datastore "github.com/blocknative/dreamboat/pkg/datastore"
+	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	realRelay "github.com/blocknative/dreamboat/pkg/relay"
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -35,7 +36,7 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := datastore.NewHeaderController(200, time.Hour)
-	d, err := datastore.NewDatastore(&datastore.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
+	d, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
 	header := randomHeaderAndTrace()
@@ -127,7 +128,7 @@ func TestPutGetRegistration(t *testing.T) {
 
 	store := newMockDatastore()
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: store, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: store, PayloadCache: cache}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -150,7 +151,7 @@ func BenchmarkPutRegistration(b *testing.B) {
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -174,7 +175,7 @@ func BenchmarkPutRegistrationParallel(b *testing.B) {
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -206,7 +207,7 @@ func BenchmarkGetRegistration(b *testing.B) {
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -231,8 +232,8 @@ func TestGetRegistrationReal(t *testing.T) {
 	var datadir = "/tmp/" + t.Name() + uuid.New().String()
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
-	ds := datastore.Datastore{
-		TTLStorage: &datastore.TTLDatastoreBatcher{
+	ds := dsbadger.Datastore{
+		TTLStorage: &dsbadger.TTLDatastoreBatcher{
 			TTLDatastore: store},
 		Badger: store.DB}
 
@@ -258,7 +259,7 @@ func BenchmarkGetRegistrationParallel(b *testing.B) {
 
 	store, _ := badger.NewDatastore(datadir, &badger.DefaultOptions)
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: &datastore.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
@@ -444,7 +445,7 @@ func random256Bytes() (b [256]byte) {
 	return b
 }
 
-var _ datastore.TTLStorage = (*mockDatastore)(nil)
+var _ dsbadger.TTLStorage = (*mockDatastore)(nil)
 
 type mockDatastore struct{ goDatastore.Datastore }
 

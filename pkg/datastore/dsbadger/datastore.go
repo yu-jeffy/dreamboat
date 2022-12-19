@@ -1,4 +1,4 @@
-package datastore
+package dsbadger
 
 import (
 	"bytes"
@@ -32,16 +32,27 @@ type Badger interface {
 	NewTransaction(bool) *badger.Txn
 }
 
+type HeaderController interface {
+	GetSingleSlot(slot uint64) (elements []structs.HeaderAndTrace, maxProfitHash [32]byte, revision uint64, err error)
+	GetLatestSlot() (slot uint64)
+	CheckForRemoval() (toBeRemoved []uint64, ok bool)
+	GetHeaders(startingSlot, stopSlot uint64, limit int) (elements []structs.HeaderAndTrace, lastSlot uint64)
+	PrependMultiple(slot uint64, hnt []structs.HeaderAndTrace) (err error)
+	Add(slot uint64, hnt structs.HeaderAndTrace) (newCreated bool, err error)
+	RemoveSlot(slot, expectedRevision uint64) (success bool)
+	GetMaxProfit(slot uint64) (hnt structs.HeaderAndTrace, ok bool)
+}
+
 type Datastore struct {
 	TTLStorage
 	Badger
 	PayloadCache *lru.Cache[structs.PayloadKey, *structs.BlockBidAndTrace]
 
-	hc *HeaderController
+	hc HeaderController
 	l  sync.Mutex
 }
 
-func NewDatastore(t TTLStorage, v Badger, hc *HeaderController, payloadCacheSize int) (*Datastore, error) {
+func NewDatastore(t TTLStorage, v Badger, hc HeaderController, payloadCacheSize int) (*Datastore, error) {
 	cache, err := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](payloadCacheSize)
 	if err != nil {
 		return nil, err
