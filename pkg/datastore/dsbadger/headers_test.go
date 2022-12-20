@@ -13,8 +13,8 @@ import (
 
 	"github.com/lthibault/log"
 
-	datastore "github.com/blocknative/dreamboat/pkg/datastore"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
+	"github.com/blocknative/dreamboat/pkg/datastore/headerscontroller"
 	"github.com/flashbots/go-boost-utils/types"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
@@ -35,7 +35,7 @@ func TestPutGetHeader(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher1", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := headerscontroller.NewHeaderController(200, time.Hour)
 	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -86,7 +86,7 @@ func TestPutGetHeaderDuplicate(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher2", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := headerscontroller.NewHeaderController(200, time.Hour)
 	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -126,7 +126,7 @@ func TestPutGetHeaders(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher3", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := headerscontroller.NewHeaderController(200, time.Hour)
 	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -214,7 +214,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 		store, err := badger.NewDatastore("/tmp/BadgerBatcher5", &badger.DefaultOptions)
 		require.NoError(t, err)
 
-		hc := datastore.NewHeaderController(200, time.Hour)
+		hc := headerscontroller.NewHeaderController(200, time.Hour)
 		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 		require.NoError(t, err)
 		for i, payload := range batch {
@@ -240,7 +240,7 @@ func TestPutGetHeaderBatch(t *testing.T) {
 
 		store, err := badger.NewDatastore("/tmp/BadgerBatcher6", &badger.DefaultOptions)
 		require.NoError(t, err)
-		hc := datastore.NewHeaderController(200, time.Hour)
+		hc := headerscontroller.NewHeaderController(200, time.Hour)
 		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 		require.NoError(t, err)
 
@@ -292,7 +292,7 @@ func TestPutGetHeaderBatchDelivered(t *testing.T) {
 
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher7", &badger.DefaultOptions)
 	require.NoError(t, err)
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := headerscontroller.NewHeaderController(200, time.Hour)
 	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -334,7 +334,7 @@ func TestGetPutComplex(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/Badger1", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(0, 0) // remove immediately
+	hc := headerscontroller.NewHeaderController(0, 0) // remove immediately
 	ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -503,7 +503,7 @@ func TestGetPutComplex(t *testing.T) {
 
 	err = ds.FixOrphanHeaders(ctx, time.Hour,
 		func(slotLag uint64, slotTimeLag time.Duration) dsbadger.HeaderController {
-			return datastore.NewHeaderController(slotLag, slotTimeLag)
+			return headerscontroller.NewHeaderController(slotLag, slotTimeLag)
 		})
 	require.NoError(t, err)
 

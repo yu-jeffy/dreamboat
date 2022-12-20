@@ -15,10 +15,6 @@ import (
 	ds "github.com/ipfs/go-datastore"
 )
 
-const (
-	RegistrationPrefix = "registration-"
-)
-
 type TTLStorage interface {
 	PutWithTTL(context.Context, ds.Key, []byte, time.Duration) error
 	Get(context.Context, ds.Key) ([]byte, error)
@@ -176,28 +172,6 @@ func (s *Datastore) GetPayload(ctx context.Context, key structs.PayloadKey) (*st
 	return &payload, false, err
 }
 
-func (s *Datastore) PutRegistration(ctx context.Context, pk structs.PubKey, registration types.SignedValidatorRegistration, ttl time.Duration) error {
-	data, err := json.Marshal(registration)
-	if err != nil {
-		return err
-	}
-	return s.TTLStorage.PutWithTTL(ctx, RegistrationKey(pk), data, ttl)
-}
-
-func (s *Datastore) PutRegistrationRaw(ctx context.Context, pk structs.PubKey, registration []byte, ttl time.Duration) error {
-	return s.TTLStorage.PutWithTTL(ctx, RegistrationKey(pk), registration, ttl)
-}
-
-func (s *Datastore) GetRegistration(ctx context.Context, pk structs.PubKey) (types.SignedValidatorRegistration, error) {
-	data, err := s.TTLStorage.Get(ctx, RegistrationKey(pk))
-	if err != nil {
-		return types.SignedValidatorRegistration{}, err
-	}
-	var registration types.SignedValidatorRegistration
-	err = json.Unmarshal(data, &registration)
-	return registration, err
-}
-
 func (s *Datastore) queryToDeliveredKey(ctx context.Context, query structs.PayloadQuery) (ds.Key, error) {
 	var (
 		rawKey []byte
@@ -285,10 +259,6 @@ func PayloadKeyKey(key structs.PayloadKey) ds.Key {
 
 func ValidatorKey(pk structs.PubKey) ds.Key {
 	return ds.NewKey(fmt.Sprintf("valdator-%s", pk.String()))
-}
-
-func RegistrationKey(pk structs.PubKey) ds.Key {
-	return ds.NewKey(fmt.Sprintf("%s%s", RegistrationPrefix, pk.String()))
 }
 
 type TTLDatastoreBatcher struct {

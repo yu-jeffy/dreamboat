@@ -42,15 +42,17 @@ type Datastore interface {
 	CacheBlock(ctx context.Context, block *structs.CompleteBlockstruct) error
 	GetMaxProfitHeader(ctx context.Context, slot uint64) (structs.HeaderAndTrace, error)
 
-	PutRegistrationRaw(context.Context, structs.PubKey, []byte, time.Duration) error
-	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
-
 	// to be changed
 	GetHeadersBySlot(ctx context.Context, slot uint64) ([]structs.HeaderAndTrace, error)
 	GetHeadersByBlockHash(ctx context.Context, hash types.Hash) ([]structs.HeaderAndTrace, error)
 	GetHeadersByBlockNum(ctx context.Context, num uint64) ([]structs.HeaderAndTrace, error)
 	GetLatestHeaders(ctx context.Context, limit uint64, stopLag uint64) ([]structs.HeaderAndTrace, error)
 	GetDeliveredBatch(context.Context, []structs.PayloadQuery) ([]structs.BidTraceWithTimestamp, error)
+}
+
+type RegistrationStore interface {
+	PutRegistrationRaw(context.Context, structs.PubKey, []byte, time.Duration) error
+	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
 }
 
 type Auctioneer interface {
@@ -76,6 +78,9 @@ type RelayConfig struct {
 
 type Relay struct {
 	d Datastore
+
+	rs RegistrationStore
+
 	a Auctioneer
 	l log.Logger
 
@@ -88,11 +93,12 @@ type Relay struct {
 }
 
 // NewRelay relay service
-func NewRelay(l log.Logger, config RelayConfig, beaconState State, d Datastore, regMngr RegistrationManager, a Auctioneer) *Relay {
+func NewRelay(l log.Logger, config RelayConfig, beaconState State, d Datastore, regMngr RegistrationManager, regS RegistrationStore, a Auctioneer) *Relay {
 	rs := &Relay{
 		d:           d,
 		a:           a,
 		l:           l,
+		rs:          regS,
 		config:      config,
 		beaconState: beaconState,
 		regMngr:     regMngr,

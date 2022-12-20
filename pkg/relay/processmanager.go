@@ -71,7 +71,7 @@ func (rm *ProcessManager) RunVerify(num uint) {
 	}
 }
 
-func (rm *ProcessManager) RunStore(store Datastore, ttl time.Duration, num uint) {
+func (rm *ProcessManager) RunStore(store RegistrationStore, ttl time.Duration, num uint) {
 	for i := uint(0); i < num; i++ {
 		rm.storeWorkersCounter.Add(1)
 		go rm.ParallelStore(store, ttl)
@@ -160,7 +160,7 @@ func (rm *ProcessManager) Get(k string) (value uint64, ok bool) {
 	return value, ok
 }
 
-func (pm *ProcessManager) ParallelStore(datas Datastore, ttl time.Duration) {
+func (pm *ProcessManager) ParallelStore(datas RegistrationStore, ttl time.Duration) {
 	defer pm.storeWorkersCounter.Done()
 
 	pm.m.RunningWorkers.WithLabelValues("ParallelStore").Inc()
@@ -176,7 +176,7 @@ func (pm *ProcessManager) ParallelStore(datas Datastore, ttl time.Duration) {
 	}
 }
 
-func (pm *ProcessManager) storeRegistration(ctx context.Context, datas Datastore, ttl time.Duration, payload StoreReq) (err error) {
+func (pm *ProcessManager) storeRegistration(ctx context.Context, datas RegistrationStore, ttl time.Duration, payload StoreReq) (err error) {
 	defer func() { // better safe than sorry
 		if r := recover(); r != nil {
 			var isErr bool

@@ -17,7 +17,7 @@ var (
 )
 
 func (r *Relay) Registration(ctx context.Context, pk types.PublicKey) (types.SignedValidatorRegistration, error) {
-	return r.d.GetRegistration(ctx, structs.PubKey{PublicKey: pk})
+	return r.rs.GetRegistration(ctx, structs.PubKey{PublicKey: pk})
 }
 
 func (r *Relay) GetPayloadDelivered(ctx context.Context, query structs.PayloadTraceQuery) ([]structs.BidTraceExtended, error) {

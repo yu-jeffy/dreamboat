@@ -14,8 +14,8 @@ import (
 	pkg "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/api"
 	"github.com/blocknative/dreamboat/pkg/auction"
-	"github.com/blocknative/dreamboat/pkg/datastore"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
+	"github.com/blocknative/dreamboat/pkg/datastore/headerscontroller"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
@@ -278,7 +278,7 @@ func run() cli.ActionFunc {
 		timeRelayStart := time.Now()
 		as := &pkg.AtomicState{}
 
-		hc := datastore.NewHeaderController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
+		hc := headerscontroller.NewHeaderController(config.RelayHeaderMemorySlotLag, config.RelayHeaderMemorySlotTimeLag)
 		hc.AttachMetrics(m)
 
 		ds, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{storage}, storage.DB, hc, c.Int("relay-payload-cache-size")) // TODO: make cache size parameter
@@ -291,7 +291,7 @@ func run() cli.ActionFunc {
 
 		if err = ds.FixOrphanHeaders(c.Context, config.TTL,
 			func(slotLag uint64, slotTimeLag time.Duration) dsbadger.HeaderController {
-				return datastore.NewHeaderController(slotLag, slotTimeLag)
+				return headerscontroller.NewHeaderController(slotLag, slotTimeLag)
 			}); err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ func run() cli.ActionFunc {
 			PubKey:                config.PubKey,
 			SecretKey:             config.SecretKey,
 			TTL:                   config.TTL,
-		}, as, ds, regMgr, auctioneer)
+		}, as, ds, regMgr, ds, auctioneer)
 		r.AttachMetrics(m)
 
 		service := pkg.NewService(config.Log, config, ds, as)

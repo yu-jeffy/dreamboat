@@ -9,8 +9,8 @@ import (
 	"time"
 
 	pkg "github.com/blocknative/dreamboat/pkg"
-	datastore "github.com/blocknative/dreamboat/pkg/datastore"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
+	"github.com/blocknative/dreamboat/pkg/datastore/headerscontroller"
 	realRelay "github.com/blocknative/dreamboat/pkg/relay"
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -35,7 +35,7 @@ func TestPutGetHeaderDelivered(t *testing.T) {
 	store, err := badger.NewDatastore("/tmp/BadgerBatcher4", &badger.DefaultOptions)
 	require.NoError(t, err)
 
-	hc := datastore.NewHeaderController(200, time.Hour)
+	hc := headerscontroller.NewHeaderController(200, time.Hour)
 	d, err := dsbadger.NewDatastore(&dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, store.DB, hc, 100)
 	require.NoError(t, err)
 
@@ -101,7 +101,7 @@ func TestPutGetPayload(t *testing.T) {
 
 	store := newMockDatastore()
 	cache, _ := lru.New[structs.PayloadKey, *structs.BlockBidAndTrace](10)
-	ds := datastore.Datastore{TTLStorage: store, PayloadCache: cache}
+	ds := dsbadger.Datastore{TTLStorage: store, PayloadCache: cache}
 
 	payload := randomBlockBidAndTrace()
 
@@ -131,14 +131,14 @@ func TestPutGetRegistration(t *testing.T) {
 	ds := dsbadger.Datastore{TTLStorage: store, PayloadCache: cache}
 
 	registration := randomRegistration()
-	key := structs.PubKey{registration.Message.Pubkey}
+	//key :=
 
 	// put
-	err := ds.PutRegistration(ctx, key, registration, time.Minute)
+	err := ds.PutRegistration(ctx, registration, time.Minute)
 	require.NoError(t, err)
 
 	// get
-	gotRegistration, err := ds.GetRegistration(ctx, key)
+	gotRegistration, err := ds.GetRegistration(ctx, structs.PubKey{registration.Message.Pubkey})
 	require.NoError(t, err)
 	require.EqualValues(t, registration, gotRegistration)
 }
@@ -154,13 +154,12 @@ func BenchmarkPutRegistration(b *testing.B) {
 	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
-	key := structs.PubKey{registration.Message.Pubkey}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		err := ds.PutRegistration(ctx, key, registration, time.Minute)
+		err := ds.PutRegistration(ctx, registration, time.Minute)
 		if err != nil {
 			panic(err)
 		}
@@ -178,7 +177,6 @@ func BenchmarkPutRegistrationParallel(b *testing.B) {
 	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
-	key := structs.PubKey{registration.Message.Pubkey}
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -190,7 +188,7 @@ func BenchmarkPutRegistrationParallel(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		go func() {
-			err := ds.PutRegistration(ctx, key, registration, time.Minute)
+			err := ds.PutRegistration(ctx, registration, time.Minute)
 			if err != nil {
 				panic(err)
 			}
@@ -212,7 +210,7 @@ func BenchmarkGetRegistration(b *testing.B) {
 	registration := randomRegistration()
 	key := structs.PubKey{registration.Message.Pubkey}
 
-	_ = ds.PutRegistration(ctx, key, registration, time.Minute)
+	_ = ds.PutRegistration(ctx, registration, time.Minute)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -238,9 +236,8 @@ func TestGetRegistrationReal(t *testing.T) {
 		Badger: store.DB}
 
 	registration := randomRegistration()
-	key := structs.PubKey{registration.Message.Pubkey}
 
-	err := ds.PutRegistration(ctx, key, registration, time.Minute*2)
+	err := ds.PutRegistration(ctx, registration, time.Minute*2)
 	require.NoError(t, err)
 
 	regs, err := ds.GetAllRegistration()
@@ -262,9 +259,8 @@ func BenchmarkGetRegistrationParallel(b *testing.B) {
 	ds := dsbadger.Datastore{TTLStorage: &dsbadger.TTLDatastoreBatcher{TTLDatastore: store}, PayloadCache: cache}
 
 	registration := randomRegistration()
-	key := structs.PubKey{registration.Message.Pubkey}
 
-	_ = ds.PutRegistration(ctx, key, registration, time.Minute)
+	_ = ds.PutRegistration(ctx, registration, time.Minute)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -276,7 +272,7 @@ func BenchmarkGetRegistrationParallel(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		go func() {
-			_, err := ds.GetRegistration(ctx, key)
+			_, err := ds.GetRegistration(ctx, structs.PubKey{registration.Message.Pubkey})
 			if err != nil {
 				panic(err)
 			}
