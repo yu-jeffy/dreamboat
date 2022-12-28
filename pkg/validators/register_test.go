@@ -1,4 +1,4 @@
-package register_test
+package validators_test
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	pkg "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
-	"github.com/blocknative/dreamboat/pkg/register"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	mock_relay "github.com/blocknative/dreamboat/pkg/relay/mocks"
 	"github.com/blocknative/dreamboat/pkg/structs"
@@ -55,7 +54,7 @@ func TestRegisterValidator(t *testing.T) {
 	ver := verify.NewVerificationManager(l, 20000)
 	ver.RunVerify(300)
 
-	r := register.NewRegister(l, relaySigningDomain, auction.NewAuctioneer(), ver, storeMgr)
+	r := register.NewRegister(l, relaySigningDomain, auction.NewAuctioneer(), ver, ds)
 
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{

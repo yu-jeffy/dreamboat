@@ -447,17 +447,6 @@ func (rs *Relay) prepareContents(submitBlockRequest *types.BuilderSubmitBlockReq
 	return s, nil
 }
 
-// GetValidators returns a list of registered block proposers in current and next epoch
-func (rs *Relay) GetValidators() structs.BuilderGetValidatorsResponseEntrySlice {
-	timer := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getValidators", "all"))
-	defer timer.ObserveDuration()
-
-	//log := rs.l.WithField("method", "GetValidators")
-	validators := rs.beaconState.Beacon().ValidatorsMap()
-	//log.With(validators).Debug("validatored map sent")
-	return validators
-}
-
 func (rs *Relay) verifyBlock(submitBlockRequest *types.BuilderSubmitBlockRequest, beaconState *structs.BeaconState) (bool, error) { // TODO(l): remove FB type
 	if submitBlockRequest == nil || submitBlockRequest.Message == nil {
 		return false, fmt.Errorf("block empty")

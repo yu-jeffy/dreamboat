@@ -16,8 +16,8 @@ import (
 	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	"github.com/blocknative/dreamboat/pkg/datastore/headerscontroller"
-	"github.com/blocknative/dreamboat/pkg/register"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
+	"github.com/blocknative/dreamboat/pkg/validators"
 	"github.com/blocknative/dreamboat/pkg/verify"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
@@ -313,13 +313,13 @@ func run() cli.ActionFunc {
 		service := pkg.NewService(config.Log, config, ds, as)
 		service.AttachMetrics(m)
 
-		regStr := register.NewStoreManager(config.Log, c.Uint("relay-store-queue-size"))
+		regStr := validators.NewStoreManager(config.Log, c.Uint("relay-store-queue-size"))
 		regStr.AttachMetrics(m)
 		loadRegistrations(ds, regStr, logger)
 
 		go regStr.RunCleanup(uint64(config.TTL), time.Hour)
 
-		regM := register.NewRegister(config.Log, domainBuilder, as, v, ds)
+		regM := validators.NewRegister(config.Log, domainBuilder, as, v, ds)
 		a := api.NewApi(config.Log, r, regM)
 		a.AttachMetrics(m)
 
@@ -430,12 +430,12 @@ func initBeacon(ctx context.Context, config pkg.Config) (pkg.BeaconClient, error
 	return pkg.NewMultiBeaconClient(config.Log, clients), nil
 }
 
-func closemanager(ctx context.Context, finish chan struct{}, regMgr *register.StoreManager) {
+func closemanager(ctx context.Context, finish chan struct{}, regMgr *validators.StoreManager) {
 	regMgr.Close(ctx)
 	finish <- struct{}{}
 }
 
-func loadRegistrations(ds *dsbadger.Datastore, regMgr *register.StoreManager, logger log.Logger) {
+func loadRegistrations(ds *dsbadger.Datastore, regMgr *validators.StoreManager, logger log.Logger) {
 	reg, err := ds.GetAllRegistration()
 	if err == nil {
 		for k, v := range reg {

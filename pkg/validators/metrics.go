@@ -1,4 +1,4 @@
-package register
+package validators
 
 import (
 	"github.com/blocknative/dreamboat/metrics"

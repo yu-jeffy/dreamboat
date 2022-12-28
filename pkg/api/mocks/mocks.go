@@ -95,20 +95,6 @@ func (mr *MockRelayMockRecorder) GetPayloadDelivered(arg0, arg1 interface{}) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPayloadDelivered", reflect.TypeOf((*MockRelay)(nil).GetPayloadDelivered), arg0, arg1)
 }
 
-// GetValidators mocks base method
-func (m *MockRelay) GetValidators() structs.BuilderGetValidatorsResponseEntrySlice {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetValidators")
-	ret0, _ := ret[0].(structs.BuilderGetValidatorsResponseEntrySlice)
-	return ret0
-}
-
-// GetValidators indicates an expected call of GetValidators
-func (mr *MockRelayMockRecorder) GetValidators() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetValidators", reflect.TypeOf((*MockRelay)(nil).GetValidators))
-}
-
 // SubmitBlock mocks base method
 func (m *MockRelay) SubmitBlock(arg0 context.Context, arg1 *types.BuilderSubmitBlockRequest) error {
 	m.ctrl.T.Helper()
@@ -144,6 +130,20 @@ func NewMockRegistrations(ctrl *gomock.Controller) *MockRegistrations {
 // EXPECT returns an object that allows the caller to indicate expected use
 func (m *MockRegistrations) EXPECT() *MockRegistrationsMockRecorder {
 	return m.recorder
+}
+
+// GetValidators mocks base method
+func (m *MockRegistrations) GetValidators() structs.BuilderGetValidatorsResponseEntrySlice {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetValidators")
+	ret0, _ := ret[0].(structs.BuilderGetValidatorsResponseEntrySlice)
+	return ret0
+}
+
+// GetValidators indicates an expected call of GetValidators
+func (mr *MockRegistrationsMockRecorder) GetValidators() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetValidators", reflect.TypeOf((*MockRegistrations)(nil).GetValidators))
 }
 
 // RegisterValidator mocks base method

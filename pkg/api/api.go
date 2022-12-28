@@ -51,8 +51,8 @@ type Relay interface {
 
 	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
 	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
-	GetValidators() structs.BuilderGetValidatorsResponseEntrySlice
 
+	// Data APIs
 	GetPayloadDelivered(context.Context, structs.PayloadTraceQuery) ([]structs.BidTraceExtended, error)
 	GetBlockReceived(context.Context, structs.HeaderTraceQuery) ([]structs.BidTraceWithTimestamp, error)
 }
@@ -62,6 +62,8 @@ type Registrations interface {
 	RegisterValidator(context.Context, []structs.SignedValidatorRegistration) error
 	// Data APIs
 	Registration(context.Context, types.PublicKey) (types.SignedValidatorRegistration, error)
+	// Builder APIs (relay spec https://flashbots.notion.site/Relay-API-Spec-5fb0819366954962bc02e81cb33840f5)
+	GetValidators() structs.BuilderGetValidatorsResponseEntrySlice
 }
 
 type API struct {
@@ -251,7 +253,7 @@ func (a *API) getValidators(w http.ResponseWriter, r *http.Request) (int, error)
 	timer := prometheus.NewTimer(a.m.ApiReqTiming.WithLabelValues("getValidators"))
 	defer timer.ObserveDuration()
 
-	vs := a.r.GetValidators()
+	vs := a.reg.GetValidators()
 	if vs == nil {
 		a.l.Trace("no registered validators for epoch")
 		vs = structs.BuilderGetValidatorsResponseEntrySlice{}

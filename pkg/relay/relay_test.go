@@ -67,7 +67,7 @@ func TestGetHeader(t *testing.T) {
 	}
 
 	a := auction.NewAuctioneer()
-	r := relay.NewRelay(log.New(), config, bs, ds, nil, ds, a)
+	r := relay.NewRelay(log.New(), config, bs, ds, ds, a)
 
 	require.NoError(t, err)
 

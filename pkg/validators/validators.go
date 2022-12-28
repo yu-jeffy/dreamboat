@@ -1,4 +1,4 @@
-package register
+package validators
 
 import (
 	"context"
@@ -30,10 +30,7 @@ type RegistrationStore interface {
 
 type RegistrationManager interface {
 	SendStore(sReq StoreReq)
-	Get(k string) (value uint64, ok bool)
-}
-
-type TimestampRegistry interface {
+	//Get(k string) (value uint64, ok bool)
 	Get(pubkey string) (timestamp uint64, ok bool)
 }
 
@@ -149,7 +146,7 @@ SendPayloads:
 	return err
 }
 
-func verifyOther(beacon *structs.BeaconState, tsReg TimestampRegistry, i int, sp structs.SignedValidatorRegistration) (svresp verify.Resp, ok bool) {
+func verifyOther(beacon *structs.BeaconState, tsReg RegistrationManager, i int, sp structs.SignedValidatorRegistration) (svresp verify.Resp, ok bool) {
 	if verifyTimestamp(sp.Message.Timestamp) {
 		return verify.Resp{Commit: false, ID: i, Err: fmt.Errorf("request too far in future for %s", sp.Message.Pubkey.String())}, false
 	}
@@ -167,4 +164,13 @@ func verifyOther(beacon *structs.BeaconState, tsReg TimestampRegistry, i int, sp
 // verifyTimestamp ensures timestamp is not too far in the future
 func verifyTimestamp(timestamp uint64) bool {
 	return timestamp > uint64(time.Now().Add(10*time.Second).Unix())
+}
+
+// GetValidators returns a list of registered block proposers in current and next epoch
+func (rs *Register) GetValidators() structs.BuilderGetValidatorsResponseEntrySlice {
+	timer := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getValidators", "all"))
+	defer timer.ObserveDuration()
+
+	validators := rs.beaconState.Beacon().ValidatorsMap()
+	return validators
 }
