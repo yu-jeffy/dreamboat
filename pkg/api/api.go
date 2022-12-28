@@ -1,4 +1,4 @@
-//go:generate mockgen  -destination=./mocks/mocks.go -package=mocks github.com/blocknative/dreamboat/pkg/api Relay
+//go:generate mockgen  -destination=./mocks/mocks.go -package=mocks github.com/blocknative/dreamboat/pkg/api Relay,Registrations
 
 package api
 
@@ -46,7 +46,6 @@ var (
 
 type Relay interface {
 	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
-	RegisterValidator(context.Context, []structs.SignedValidatorRegistration) error
 	GetHeader(context.Context, structs.HeaderRequest) (*types.GetHeaderResponse, error)
 	GetPayload(context.Context, *types.SignedBlindedBeaconBlock) (*types.GetPayloadResponse, error)
 
@@ -54,21 +53,27 @@ type Relay interface {
 	SubmitBlock(context.Context, *types.BuilderSubmitBlockRequest) error
 	GetValidators() structs.BuilderGetValidatorsResponseEntrySlice
 
-	// Data APIs
 	GetPayloadDelivered(context.Context, structs.PayloadTraceQuery) ([]structs.BidTraceExtended, error)
 	GetBlockReceived(context.Context, structs.HeaderTraceQuery) ([]structs.BidTraceWithTimestamp, error)
+}
+
+type Registrations interface {
+	// Proposer APIs (builder spec https://github.com/ethereum/builder-specs)
+	RegisterValidator(context.Context, []structs.SignedValidatorRegistration) error
+	// Data APIs
 	Registration(context.Context, types.PublicKey) (types.SignedValidatorRegistration, error)
 }
 
 type API struct {
-	l log.Logger
-	r Relay
+	l   log.Logger
+	r   Relay
+	reg Registrations
 
 	m APIMetrics
 }
 
-func NewApi(l log.Logger, r Relay) (a *API) {
-	a = &API{l: l, r: r}
+func NewApi(l log.Logger, r Relay, reg Registrations) (a *API) {
+	a = &API{l: l, r: r, reg: reg}
 	a.initMetrics()
 	return a
 }
@@ -137,7 +142,7 @@ func (a *API) registerValidator(w http.ResponseWriter, r *http.Request) (status 
 		a.m.ApiReqElCount.WithLabelValues("registerValidator", "payload").Observe(float64(len(payload)))
 	}
 
-	if err = a.r.RegisterValidator(r.Context(), payload); err != nil {
+	if err = a.reg.RegisterValidator(r.Context(), payload); err != nil {
 		a.m.ApiReqCounter.WithLabelValues("registerValidator", "400", "register validator").Inc()
 		a.l.With(log.F{
 			"code":     400,
@@ -278,7 +283,7 @@ func (a *API) specificRegistration(w http.ResponseWriter, r *http.Request) (int,
 		return http.StatusBadRequest, err
 	}
 
-	registration, err := a.r.Registration(r.Context(), pk)
+	registration, err := a.reg.Registration(r.Context(), pk)
 	if err != nil {
 		a.m.ApiReqCounter.WithLabelValues("specificRegistration", "500", "registration").Inc()
 		return http.StatusInternalServerError, err

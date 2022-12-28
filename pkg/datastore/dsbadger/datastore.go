@@ -15,6 +15,10 @@ import (
 	ds "github.com/ipfs/go-datastore"
 )
 
+const (
+	RegistrationPrefix = "registration-"
+)
+
 type TTLStorage interface {
 	PutWithTTL(context.Context, ds.Key, []byte, time.Duration) error
 	Get(context.Context, ds.Key) ([]byte, error)

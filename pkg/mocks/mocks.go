@@ -6,6 +6,7 @@ package mocks
 
 import (
 	context "context"
+	metrics "github.com/blocknative/dreamboat/metrics"
 	relay "github.com/blocknative/dreamboat/pkg"
 	structs "github.com/blocknative/dreamboat/pkg/structs"
 	types "github.com/flashbots/go-boost-utils/types"
@@ -72,6 +73,18 @@ func NewMockBeaconClient(ctrl *gomock.Controller) *MockBeaconClient {
 // EXPECT returns an object that allows the caller to indicate expected use
 func (m *MockBeaconClient) EXPECT() *MockBeaconClientMockRecorder {
 	return m.recorder
+}
+
+// AttachMetrics mocks base method
+func (m *MockBeaconClient) AttachMetrics(arg0 *metrics.Metrics) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AttachMetrics", arg0)
+}
+
+// AttachMetrics indicates an expected call of AttachMetrics
+func (mr *MockBeaconClientMockRecorder) AttachMetrics(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AttachMetrics", reflect.TypeOf((*MockBeaconClient)(nil).AttachMetrics), arg0)
 }
 
 // Endpoint mocks base method

@@ -186,21 +186,6 @@ func (mr *MockDatastoreMockRecorder) GetPayload(arg0, arg1 interface{}) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPayload", reflect.TypeOf((*MockDatastore)(nil).GetPayload), arg0, arg1)
 }
 
-// GetRegistration mocks base method
-func (m *MockDatastore) GetRegistration(arg0 context.Context, arg1 structs.PubKey) (types.SignedValidatorRegistration, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRegistration", arg0, arg1)
-	ret0, _ := ret[0].(types.SignedValidatorRegistration)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetRegistration indicates an expected call of GetRegistration
-func (mr *MockDatastoreMockRecorder) GetRegistration(arg0, arg1 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRegistration", reflect.TypeOf((*MockDatastore)(nil).GetRegistration), arg0, arg1)
-}
-
 // PutDelivered mocks base method
 func (m *MockDatastore) PutDelivered(arg0 context.Context, arg1 structs.Slot, arg2 structs.DeliveredTrace, arg3 time.Duration) error {
 	m.ctrl.T.Helper()
@@ -241,20 +226,6 @@ func (m *MockDatastore) PutPayload(arg0 context.Context, arg1 structs.PayloadKey
 func (mr *MockDatastoreMockRecorder) PutPayload(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutPayload", reflect.TypeOf((*MockDatastore)(nil).PutPayload), arg0, arg1, arg2, arg3)
-}
-
-// PutRegistrationRaw mocks base method
-func (m *MockDatastore) PutRegistrationRaw(arg0 context.Context, arg1 structs.PubKey, arg2 []byte, arg3 time.Duration) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PutRegistrationRaw", arg0, arg1, arg2, arg3)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// PutRegistrationRaw indicates an expected call of PutRegistrationRaw
-func (mr *MockDatastoreMockRecorder) PutRegistrationRaw(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutRegistrationRaw", reflect.TypeOf((*MockDatastore)(nil).PutRegistrationRaw), arg0, arg1, arg2, arg3)
 }
 
 // MockState is a mock of State interface

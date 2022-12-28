@@ -14,10 +14,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
+	"github.com/blocknative/dreamboat/pkg/verify"
 )
 
 type State interface {
 	Beacon() *structs.BeaconState
+}
+
+type Verifier interface {
+	Enqueue(ctx context.Context, sig [96]byte, pubkey [48]byte, msg [32]byte) (err error)
 }
 
 var (
@@ -50,21 +55,9 @@ type Datastore interface {
 	GetDeliveredBatch(context.Context, []structs.PayloadQuery) ([]structs.BidTraceWithTimestamp, error)
 }
 
-type RegistrationStore interface {
-	PutRegistrationRaw(context.Context, structs.PubKey, []byte, time.Duration) error
-	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
-}
-
 type Auctioneer interface {
 	AddBlock(block *structs.CompleteBlockstruct) bool
 	MaxProfitBlock(slot structs.Slot) (*structs.CompleteBlockstruct, bool)
-}
-
-type RegistrationManager interface {
-	GetVerifyChan(buffer uint) chan VerifyReq
-
-	SendStore(sReq StoreReq)
-	Get(k string) (value uint64, ok bool)
 }
 
 type RelayConfig struct {
@@ -79,13 +72,12 @@ type RelayConfig struct {
 type Relay struct {
 	d Datastore
 
-	rs RegistrationStore
-
 	a Auctioneer
 	l log.Logger
 
-	regMngr RegistrationManager
-	config  RelayConfig
+	//regMngr RegistrationManager
+	ver    Verifier
+	config RelayConfig
 
 	beaconState State
 
@@ -93,23 +85,17 @@ type Relay struct {
 }
 
 // NewRelay relay service
-func NewRelay(l log.Logger, config RelayConfig, beaconState State, d Datastore, regMngr RegistrationManager, regS RegistrationStore, a Auctioneer) *Relay {
+func NewRelay(l log.Logger, config RelayConfig, ver Verifier, beaconState State, d Datastore, a Auctioneer) *Relay {
 	rs := &Relay{
 		d:           d,
 		a:           a,
 		l:           l,
-		rs:          regS,
+		ver:         ver,
 		config:      config,
 		beaconState: beaconState,
-		regMngr:     regMngr,
 	}
 	rs.initMetrics()
 	return rs
-}
-
-// verifyTimestamp ensures timestamp is not too far in the future
-func verifyTimestamp(timestamp uint64) bool {
-	return timestamp > uint64(time.Now().Add(10*time.Second).Unix())
 }
 
 // GetHeader is called by a block proposer communicating through mev-boost and returns a bid along with an execution payload header
@@ -231,7 +217,7 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 	if err != nil {
 		return nil, fmt.Errorf("signature invalid") // err
 	}
-	ok, err := VerifySignatureBytes(msg, payloadRequest.Signature[:], pk[:])
+	ok, err := verify.VerifySignatureBytes(msg, payloadRequest.Signature[:], pk[:])
 	if err != nil || !ok {
 		return nil, fmt.Errorf("signature invalid")
 	}
@@ -495,21 +481,7 @@ func (rs *Relay) verifySubmitSignature(ctx context.Context, submitBlockRequest *
 		return false, fmt.Errorf("signature invalid")
 	}
 
-	respChA := NewRespC(1)
-	rs.regMngr.GetVerifyChan(ResponseQueueSubmit) <- VerifyReq{
-		Signature: submitBlockRequest.Signature,
-		Pubkey:    submitBlockRequest.Message.BuilderPubkey,
-		Msg:       msg,
-		Response:  respChA}
-
-	select {
-	case err = <-respChA.Done():
-	case <-ctx.Done():
-		err = ctx.Err()
-		respChA.Close(0, err)
-		return false, err
-	}
-
+	err = rs.ver.Enqueue(ctx, submitBlockRequest.Signature, submitBlockRequest.Message.BuilderPubkey, msg)
 	return (err != nil), err
 }
 

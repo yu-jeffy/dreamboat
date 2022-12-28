@@ -1,4 +1,4 @@
-package relay_test
+package register_test
 
 import (
 	"context"
@@ -10,9 +10,11 @@ import (
 	pkg "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
+	"github.com/blocknative/dreamboat/pkg/register"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	mock_relay "github.com/blocknative/dreamboat/pkg/relay/mocks"
 	"github.com/blocknative/dreamboat/pkg/structs"
+	"github.com/blocknative/dreamboat/pkg/verify"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
@@ -47,11 +49,13 @@ func TestRegisterValidator(t *testing.T) {
 		BuilderSigningDomain: relaySigningDomain,
 	}
 	l := log.New()
-	regMgr := relay.NewProcessManager(l, 20000, 20000)
-	regMgr.RunStore(ds, config.TTL, 300)
-	regMgr.RunVerify(300)
+	storeMgr := register.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, config.TTL, 300)
 
-	r := relay.NewRelay(l, config, bs, ds, regMgr, auction.NewAuctioneer())
+	ver := verify.NewVerificationManager(l, 20000)
+	ver.RunVerify(300)
+
+	r := register.NewRegister(l, relaySigningDomain, auction.NewAuctioneer(), ver, storeMgr)
 
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
@@ -375,26 +379,4 @@ func BenchmarkRegisterValidatorParallel(b *testing.B) {
 		}()
 	}
 
-}
-
-func BenchmarkSignatureValidation(b *testing.B) {
-	relaySigningDomain, _ := pkg.ComputeDomain(
-		types.DomainTypeAppBuilder,
-		pkg.GenesisForkVersionRopsten,
-		types.Root{}.String())
-	registration, _ := validValidatorRegistration(b, relaySigningDomain)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_, err := relay.VerifySignature(
-			registration.Message,
-			relaySigningDomain,
-			registration.Message.Pubkey[:],
-			registration.Signature[:])
-		if err != nil {
-			panic(err)
-		}
-	}
 }
