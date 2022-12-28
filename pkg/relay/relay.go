@@ -357,7 +357,14 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 	}
 
 	timer3 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("submitBlock", "verify"))
-	_, err = rs.verifySubmitSignature(ctx, submitBlockRequest)
+
+	msg, err := types.ComputeSigningRoot(submitBlockRequest.Message, rs.config.BuilderSigningDomain)
+	if err != nil {
+		return fmt.Errorf("signature invalid")
+	}
+
+	err = rs.ver.Enqueue(ctx, submitBlockRequest.Signature, submitBlockRequest.Message.BuilderPubkey, msg)
+
 	timer3.ObserveDuration()
 	if err != nil {
 		return fmt.Errorf("verify block: %w", err)
@@ -462,16 +469,6 @@ func (rs *Relay) verifyBlock(submitBlockRequest *types.BuilderSubmitBlockRequest
 	}
 
 	return true, nil
-}
-
-func (rs *Relay) verifySubmitSignature(ctx context.Context, submitBlockRequest *types.BuilderSubmitBlockRequest) (ok bool, err error) { // TODO(l): remove FB type
-	msg, err := types.ComputeSigningRoot(submitBlockRequest.Message, rs.config.BuilderSigningDomain)
-	if err != nil {
-		return false, fmt.Errorf("signature invalid")
-	}
-
-	err = rs.ver.Enqueue(ctx, submitBlockRequest.Signature, submitBlockRequest.Message.BuilderPubkey, msg)
-	return (err != nil), err
 }
 
 func SubmissionToKey(submission *types.BuilderSubmitBlockRequest) structs.PayloadKey {

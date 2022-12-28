@@ -8,12 +8,13 @@ import (
 	"time"
 
 	pkg "github.com/blocknative/dreamboat/pkg"
-	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore/dsbadger"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
 	mock_relay "github.com/blocknative/dreamboat/pkg/relay/mocks"
 	"github.com/blocknative/dreamboat/pkg/structs"
+	"github.com/blocknative/dreamboat/pkg/validators"
 	"github.com/blocknative/dreamboat/pkg/verify"
+	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
@@ -43,24 +44,19 @@ func TestRegisterValidator(t *testing.T) {
 		types.Root{}.String())
 	require.NoError(t, err)
 
-	config := relay.RelayConfig{
-		TTL:                  time.Minute,
-		BuilderSigningDomain: relaySigningDomain,
-	}
 	l := log.New()
-	storeMgr := register.NewStoreManager(l, 20000)
-	storeMgr.RunStore(ds, config.TTL, 300)
+	storeMgr := validators.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, time.Minute, 300)
 
 	ver := verify.NewVerificationManager(l, 20000)
 	ver.RunVerify(300)
-
-	r := register.NewRegister(l, relaySigningDomain, auction.NewAuctioneer(), ver, ds)
 
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
 			KnownValidators: make(map[types.PubkeyHex]struct{}),
 		},
 	}
+	r := validators.NewRegister(l, relaySigningDomain, fbn, ver, ds)
 
 	registrations := make([]structs.SignedValidatorRegistration, 0, N)
 	for i := 0; i < N; i++ {
@@ -114,11 +110,13 @@ func TestBrokenSignatureRegisterValidator(t *testing.T) {
 	}
 
 	l := log.New()
-	regMgr := relay.NewProcessManager(l, 20000, 20000)
-	regMgr.RunStore(ds, config.TTL, 300)
-	regMgr.RunVerify(300)
+	storeMgr := validators.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, config.TTL, 300)
 
-	r := relay.NewRelay(l, config, bs, ds, regMgr, auction.NewAuctioneer())
+	ver := verify.NewVerificationManager(l, 20000)
+	ver.RunVerify(300)
+
+	r := validators.NewRegister(l, config, bs, ds, ver, ds)
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
 			KnownValidators: make(map[types.PubkeyHex]struct{}),
@@ -190,11 +188,14 @@ func TestNotKnownRegisterValidator(t *testing.T) {
 	}
 
 	l := log.New()
-	regMgr := relay.NewProcessManager(l, 20000, 20000)
-	regMgr.RunStore(ds, config.TTL, 300)
-	regMgr.RunVerify(300)
 
-	r := relay.NewRelay(l, config, bs, ds, regMgr, auction.NewAuctioneer())
+	storeMgr := validators.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, config.TTL, 300)
+
+	ver := verify.NewVerificationManager(l, 20000)
+	ver.RunVerify(300)
+
+	r := validators.NewRegister(l, config, bs, ds, ver, ds)
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
 			KnownValidators: make(map[types.PubkeyHex]struct{}),
@@ -243,11 +244,14 @@ func BenchmarkRegisterValidator(b *testing.B) {
 	}
 
 	l := log.New()
-	regMgr := relay.NewProcessManager(l, 20000, 20000)
-	regMgr.RunStore(ds, config.TTL, 300)
-	regMgr.RunVerify(300)
 
-	r := relay.NewRelay(l, config, bs, ds, regMgr, auction.NewAuctioneer())
+	storeMgr := validators.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, config.TTL, 300)
+
+	ver := verify.NewVerificationManager(l, 20000)
+	ver.RunVerify(300)
+
+	r := validators.NewRegister(l, config, bs, ds, ver, ds)
 
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
@@ -291,22 +295,19 @@ func BenchmarkRegisterValidatorParallel(b *testing.B) {
 		pkg.GenesisForkVersionRopsten,
 		types.Root{}.String())
 
-	config := relay.RelayConfig{
-		TTL:                  5 * time.Minute,
-		BuilderSigningDomain: relaySigningDomain,
-	}
-
 	l := log.New()
-	regMgr := relay.NewProcessManager(l, 20000, 20000)
-	regMgr.RunStore(ds, config.TTL, 300)
-	regMgr.RunVerify(300)
+	storeMgr := validators.NewStoreManager(l, 20000)
+	storeMgr.RunStore(ds, 5*time.Minute, 300)
+
+	ver := verify.NewVerificationManager(l, 20000)
+	ver.RunVerify(300)
 
 	ctrl := gomock.NewController(b)
 	bs := mock_relay.NewMockState(ctrl)
 
 	const N = 10_000
 
-	r := relay.NewRelay(l, config, bs, ds, regMgr, auction.NewAuctioneer())
+	r := validators.NewRegister(l, relaySigningDomain, bs, ds, ver, ds)
 	fbn := &structs.BeaconState{
 		ValidatorsState: structs.ValidatorsState{
 			KnownValidators: make(map[types.PubkeyHex]struct{}),
@@ -378,4 +379,26 @@ func BenchmarkRegisterValidatorParallel(b *testing.B) {
 		}()
 	}
 
+}
+
+func validValidatorRegistration(t require.TestingT, domain types.Domain) (*types.SignedValidatorRegistration, *bls.SecretKey) {
+	sk, pk, err := bls.GenerateNewKeypair()
+	require.NoError(t, err)
+
+	var pubKey types.PublicKey
+	pubKey.FromSlice(pk.Compress())
+
+	msg := &types.RegisterValidatorRequestMessage{
+		FeeRecipient: types.Address{0x42},
+		GasLimit:     15_000_000,
+		Timestamp:    1652369368,
+		Pubkey:       pubKey,
+	}
+
+	signature, err := types.SignMessage(msg, domain, sk)
+	require.NoError(t, err)
+	return &types.SignedValidatorRegistration{
+		Message:   msg,
+		Signature: signature,
+	}, sk
 }
