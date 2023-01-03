@@ -14,10 +14,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/blocknative/dreamboat/pkg/structs"
+	"github.com/blocknative/dreamboat/pkg/verify"
 )
 
 type State interface {
 	Beacon() *structs.BeaconState
+}
+
+type Verifier interface {
+	Enqueue(ctx context.Context, sig [96]byte, pubkey [48]byte, msg [32]byte) (err error)
 }
 
 var (
@@ -42,9 +47,6 @@ type Datastore interface {
 	CacheBlock(ctx context.Context, block *structs.CompleteBlockstruct) error
 	GetMaxProfitHeader(ctx context.Context, slot uint64) (structs.HeaderAndTrace, error)
 
-	PutRegistrationRaw(context.Context, structs.PubKey, []byte, time.Duration) error
-	GetRegistration(context.Context, structs.PubKey) (types.SignedValidatorRegistration, error)
-
 	// to be changed
 	GetHeadersBySlot(ctx context.Context, slot uint64) ([]structs.HeaderAndTrace, error)
 	GetHeadersByBlockHash(ctx context.Context, hash types.Hash) ([]structs.HeaderAndTrace, error)
@@ -58,13 +60,6 @@ type Auctioneer interface {
 	MaxProfitBlock(slot structs.Slot) (*structs.CompleteBlockstruct, bool)
 }
 
-type RegistrationManager interface {
-	GetVerifyChan(buffer uint) chan VerifyReq
-
-	SendStore(sReq StoreReq)
-	Get(k string) (value uint64, ok bool)
-}
-
 type RelayConfig struct {
 	BuilderSigningDomain  types.Domain
 	ProposerSigningDomain types.Domain
@@ -76,11 +71,13 @@ type RelayConfig struct {
 
 type Relay struct {
 	d Datastore
+
 	a Auctioneer
 	l log.Logger
 
-	regMngr RegistrationManager
-	config  RelayConfig
+	//regMngr RegistrationManager
+	ver    Verifier
+	config RelayConfig
 
 	beaconState State
 
@@ -88,22 +85,17 @@ type Relay struct {
 }
 
 // NewRelay relay service
-func NewRelay(l log.Logger, config RelayConfig, beaconState State, d Datastore, regMngr RegistrationManager, a Auctioneer) *Relay {
+func NewRelay(l log.Logger, config RelayConfig, ver Verifier, beaconState State, d Datastore, a Auctioneer) *Relay {
 	rs := &Relay{
 		d:           d,
 		a:           a,
 		l:           l,
+		ver:         ver,
 		config:      config,
 		beaconState: beaconState,
-		regMngr:     regMngr,
 	}
 	rs.initMetrics()
 	return rs
-}
-
-// verifyTimestamp ensures timestamp is not too far in the future
-func verifyTimestamp(timestamp uint64) bool {
-	return timestamp > uint64(time.Now().Add(10*time.Second).Unix())
 }
 
 // GetHeader is called by a block proposer communicating through mev-boost and returns a bid along with an execution payload header
@@ -225,7 +217,7 @@ func (rs *Relay) GetPayload(ctx context.Context, payloadRequest *types.SignedBli
 	if err != nil {
 		return nil, fmt.Errorf("signature invalid") // err
 	}
-	ok, err := VerifySignatureBytes(msg, payloadRequest.Signature[:], pk[:])
+	ok, err := verify.VerifySignatureBytes(msg, payloadRequest.Signature[:], pk[:])
 	if err != nil || !ok {
 		return nil, fmt.Errorf("signature invalid")
 	}
@@ -365,7 +357,14 @@ func (rs *Relay) SubmitBlock(ctx context.Context, submitBlockRequest *types.Buil
 	}
 
 	timer3 := prometheus.NewTimer(rs.m.Timing.WithLabelValues("submitBlock", "verify"))
-	_, err = rs.verifySubmitSignature(ctx, submitBlockRequest)
+
+	msg, err := types.ComputeSigningRoot(submitBlockRequest.Message, rs.config.BuilderSigningDomain)
+	if err != nil {
+		return fmt.Errorf("signature invalid")
+	}
+
+	err = rs.ver.Enqueue(ctx, submitBlockRequest.Signature, submitBlockRequest.Message.BuilderPubkey, msg)
+
 	timer3.ObserveDuration()
 	if err != nil {
 		return fmt.Errorf("verify block: %w", err)
@@ -455,17 +454,6 @@ func (rs *Relay) prepareContents(submitBlockRequest *types.BuilderSubmitBlockReq
 	return s, nil
 }
 
-// GetValidators returns a list of registered block proposers in current and next epoch
-func (rs *Relay) GetValidators() structs.BuilderGetValidatorsResponseEntrySlice {
-	timer := prometheus.NewTimer(rs.m.Timing.WithLabelValues("getValidators", "all"))
-	defer timer.ObserveDuration()
-
-	//log := rs.l.WithField("method", "GetValidators")
-	validators := rs.beaconState.Beacon().ValidatorsMap()
-	//log.With(validators).Debug("validatored map sent")
-	return validators
-}
-
 func (rs *Relay) verifyBlock(submitBlockRequest *types.BuilderSubmitBlockRequest, beaconState *structs.BeaconState) (bool, error) { // TODO(l): remove FB type
 	if submitBlockRequest == nil || submitBlockRequest.Message == nil {
 		return false, fmt.Errorf("block empty")
@@ -481,30 +469,6 @@ func (rs *Relay) verifyBlock(submitBlockRequest *types.BuilderSubmitBlockRequest
 	}
 
 	return true, nil
-}
-
-func (rs *Relay) verifySubmitSignature(ctx context.Context, submitBlockRequest *types.BuilderSubmitBlockRequest) (ok bool, err error) { // TODO(l): remove FB type
-	msg, err := types.ComputeSigningRoot(submitBlockRequest.Message, rs.config.BuilderSigningDomain)
-	if err != nil {
-		return false, fmt.Errorf("signature invalid")
-	}
-
-	respChA := NewRespC(1)
-	rs.regMngr.GetVerifyChan(ResponseQueueSubmit) <- VerifyReq{
-		Signature: submitBlockRequest.Signature,
-		Pubkey:    submitBlockRequest.Message.BuilderPubkey,
-		Msg:       msg,
-		Response:  respChA}
-
-	select {
-	case err = <-respChA.Done():
-	case <-ctx.Done():
-		err = ctx.Err()
-		respChA.Close(0, err)
-		return false, err
-	}
-
-	return (err != nil), err
 }
 
 func SubmissionToKey(submission *types.BuilderSubmitBlockRequest) structs.PayloadKey {
