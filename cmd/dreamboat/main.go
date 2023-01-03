@@ -10,19 +10,20 @@ import (
 
 	"time"
 
+	"github.com/blocknative/dreamboat/blstools"
 	"github.com/blocknative/dreamboat/metrics"
 	pkg "github.com/blocknative/dreamboat/pkg"
 	"github.com/blocknative/dreamboat/pkg/api"
 	"github.com/blocknative/dreamboat/pkg/auction"
 	"github.com/blocknative/dreamboat/pkg/datastore"
 	relay "github.com/blocknative/dreamboat/pkg/relay"
+	"github.com/blocknative/dreamboat/pkg/validators"
+	"github.com/blocknative/dreamboat/pkg/verify"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/types"
 	badger "github.com/ipfs/go-ds-badger2"
 	"github.com/lthibault/log"
 	"github.com/sirupsen/logrus"
-	blst "github.com/supranational/blst/bindings/go"
 	"github.com/urfave/cli/v2"
 )
 
@@ -200,7 +201,11 @@ func main() {
 
 func setup() cli.BeforeFunc {
 	return func(c *cli.Context) (err error) {
-		sk, pk, err := setupKeys(c)
+		skBytes, err := hexutil.Decode(c.String("secretKey"))
+		if err != nil {
+			return err
+		}
+		sk, pk, err := blstools.SecretKeyFromBytes(skBytes)
 		if err != nil {
 			return err
 		}
@@ -226,21 +231,6 @@ func setup() cli.BeforeFunc {
 
 		return
 	}
-}
-
-func setupKeys(c *cli.Context) (*blst.SecretKey, types.PublicKey, error) {
-	skBytes, err := hexutil.Decode(c.String("secretKey"))
-	if err != nil {
-		return nil, types.PublicKey{}, err
-	}
-	sk, err := bls.SecretKeyFromBytes(skBytes[:])
-	if err != nil {
-		return nil, types.PublicKey{}, err
-	}
-
-	var pk types.PublicKey
-	err = pk.FromSlice(bls.PublicKeyFromSecretKey(sk).Compress())
-	return sk, pk, err
 }
 
 func run() cli.ActionFunc {
@@ -294,12 +284,7 @@ func run() cli.ActionFunc {
 
 		go ds.MemoryCleanup(c.Context, config.RelayHeaderMemoryPurgeInterval, config.TTL)
 
-		regMgr := relay.NewProcessManager(config.Log, c.Uint("relay-verify-queue-size"), c.Uint("relay-store-queue-size"))
-		regMgr.AttachMetrics(m)
-		loadRegistrations(ds, regMgr, logger)
-
-		go regMgr.RunCleanup(uint64(config.TTL), time.Hour)
-
+		v := verify.NewVerificationManager(config.Log, c.Uint("relay-verify-queue-size"))
 		auctioneer := auction.NewAuctioneer()
 		r := relay.NewRelay(config.Log, relay.RelayConfig{
 			BuilderSigningDomain:  domainBuilder,
@@ -307,17 +292,23 @@ func run() cli.ActionFunc {
 			PubKey:                config.PubKey,
 			SecretKey:             config.SecretKey,
 			TTL:                   config.TTL,
-		}, as, ds, regMgr, auctioneer)
+		}, v, as, ds, auctioneer)
 		r.AttachMetrics(m)
 
 		service := pkg.NewService(config.Log, config, ds, as)
 		service.AttachMetrics(m)
 
-		a := api.NewApi(config.Log, r)
+		regStr := validators.NewStoreManager(config.Log, c.Uint("relay-store-queue-size"))
+		regStr.AttachMetrics(m)
+		loadRegistrations(ds, regStr, logger)
+		go regStr.RunCleanup(uint64(config.TTL), time.Hour)
+
+		regM := validators.NewRegister(config.Log, domainBuilder, as, v, ds)
+		a := api.NewApi(config.Log, r, regM)
 		a.AttachMetrics(m)
 
-		regMgr.RunStore(ds, config.TTL, c.Uint("relay-workers-store-validator"))
-		regMgr.RunVerify(c.Uint("relay-workers-verify"))
+		regStr.RunStore(ds, config.TTL, c.Uint("relay-workers-store-validator"))
+		v.RunVerify(c.Uint("relay-workers-verify"))
 
 		logger.With(log.F{
 			"service":     "relay",
@@ -398,7 +389,7 @@ func run() cli.ActionFunc {
 
 		ctx, _ = context.WithTimeout(context.Background(), shutdownTimeout/2)
 		finish := make(chan struct{})
-		go closemanager(ctx, finish, regMgr)
+		go closemanager(ctx, finish, regStr)
 
 		select {
 		case <-finish:
@@ -423,12 +414,12 @@ func initBeacon(ctx context.Context, config pkg.Config) (pkg.BeaconClient, error
 	return pkg.NewMultiBeaconClient(config.Log, clients), nil
 }
 
-func closemanager(ctx context.Context, finish chan struct{}, regMgr *relay.ProcessManager) {
+func closemanager(ctx context.Context, finish chan struct{}, regMgr *validators.StoreManager) {
 	regMgr.Close(ctx)
 	finish <- struct{}{}
 }
 
-func loadRegistrations(ds *datastore.Datastore, regMgr *relay.ProcessManager, logger log.Logger) {
+func loadRegistrations(ds *datastore.Datastore, regMgr *validators.StoreManager, logger log.Logger) {
 	reg, err := ds.GetAllRegistration()
 	if err == nil {
 		for k, v := range reg {
@@ -440,7 +431,6 @@ func loadRegistrations(ds *datastore.Datastore, regMgr *relay.ProcessManager, lo
 			"count-elements": len(reg),
 		}).Info("registrations loaded")
 	}
-
 }
 
 func logger(c *cli.Context) log.Logger {
